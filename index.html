@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>الفشّار 🤥 — شاشة المذيع</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="host">
+    <div class="host-top">
+      <div class="logo">الفشّار <span>🤥</span></div>
+      <div class="meta">
+        <span id="modeBadge" class="mode-badge hidden">وضع التجربة</span>
+        <span id="roomLabel"></span>
+      </div>
+      <div class="controls" id="topControls">
+        <button class="btn small ghost" id="btnPlus">+15 ثانية</button>
+        <button class="btn small ghost" id="btnEnd">خلّص دلوقتي ⏭</button>
+        <button class="btn small ghost" id="btnSwap">سؤال تاني 🔄</button>
+        <button class="btn small ghost" id="btnMute">🔊</button>
+        <button class="btn small ghost" id="btnNew" title="لعبة جديدة من الأول">🆕</button>
+      </div>
+    </div>
+    <div class="alertbar hidden" id="alert"></div>
+    <div class="stage" id="stage"></div>
+  </div>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/qr.js"></script>
+  <script src="js/text.js"></script>
+  <script src="js/questions.js"></script>
+  <script src="js/db.js"></script>
+  <script src="js/sound.js"></script>
+  <script src="js/host.js"></script>
+</body>
+</html>
