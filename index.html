@@ -6,19 +6,21 @@
   <title>الفشّار 🤥 — شاشة المذيع</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
-<body>
+<body class="is-host">
   <div class="host">
     <div class="host-top">
       <div class="logo">الفشّار <span>🤥</span></div>
+      <div class="phase-info" id="phaseInfo"></div>
       <div class="meta">
         <span id="modeBadge" class="mode-badge hidden">وضع التجربة</span>
-        <span id="roomLabel"></span>
+        <span id="roomLabel" class="room-label"></span>
       </div>
       <div class="controls" id="topControls">
-        <button class="btn small ghost" id="btnPlus">+15 ثانية</button>
-        <button class="btn small ghost" id="btnEnd">خلّص دلوقتي ⏭</button>
-        <button class="btn small ghost" id="btnSwap">سؤال تاني 🔄</button>
-        <button class="btn small ghost" id="btnMute">🔊</button>
+        <button class="btn small ghost" id="btnPlus" title="زوّد الوقت">+15 ثانية</button>
+        <button class="btn small ghost" id="btnEnd" title="اقفل المرحلة دي على طول">خلّص دلوقتي ⏭</button>
+        <button class="btn small ghost" id="btnSwap" title="بدّل السؤال بسؤال احتياطي">سؤال تاني 🔄</button>
+        <button class="btn small ghost hidden" id="btnAuto" title="الكشف يمشي لوحده كل 9 ثواني">⏯ تلقائي</button>
+        <button class="btn small ghost" id="btnMute" title="الصوت">🔊</button>
         <button class="btn small ghost" id="btnNew" title="لعبة جديدة من الأول">🆕</button>
       </div>
     </div>
@@ -31,6 +33,7 @@
   <script src="js/config.js"></script>
   <script src="js/qr.js"></script>
   <script src="js/text.js"></script>
+  <script src="js/ui.js"></script>
   <script src="js/questions.js"></script>
   <script src="js/db.js"></script>
   <script src="js/sound.js"></script>

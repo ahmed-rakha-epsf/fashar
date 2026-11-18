@@ -39,6 +39,12 @@
     laugh() { [0, .13, .26, .39].forEach((w, i) => tone(520 - i * 40, 0.1, "square", 0.08, w)); },
     drum() { for (let i = 0; i < 18; i++) noise(0.07, 0.18 + i * 0.012, i * 0.075); },
     ding() { tone(880, 0.5, "sine", 0.22); tone(1320, 0.6, "sine", 0.15, 0.12); tone(1760, 0.7, "sine", 0.1, 0.24); },
-    fanfare() { [523, 659, 784, 1046].forEach((f, i) => tone(f, 0.35, "triangle", 0.18, i * 0.14)); }
+    fanfare() { [523, 659, 784, 1046].forEach((f, i) => tone(f, 0.35, "triangle", 0.18, i * 0.14)); },
+    // صوت «غلط!» لما الكدبة تتكشف
+    buzz() { tone(110, 0.45, "sawtooth", 0.16); tone(92, 0.45, "sawtooth", 0.12, 0.02); noise(0.2, 0.15); },
+    whoosh() { const c = ac(); if (!c || muted) return; const t = c.currentTime; const o = c.createOscillator(), g = c.createGain(); o.type = "sine"; o.frequency.setValueAtTime(260, t); o.frequency.exponentialRampToValueAtTime(900, t + 0.22); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.12, t + 0.05); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.25); o.connect(g).connect(c.destination); o.start(t); o.stop(t + 0.3); },
+    coin() { tone(988, 0.08, "square", 0.08); tone(1319, 0.25, "square", 0.08, 0.08); },
+    tada() { [523, 659, 784].forEach((f, i) => tone(f, 0.18, "triangle", 0.16, i * 0.09)); tone(1046, 0.7, "triangle", 0.2, 0.3); tone(1568, 0.7, "sine", 0.08, 0.3); },
+    heart() { tone(70, 0.12, "sine", 0.35); tone(62, 0.14, "sine", 0.3, 0.16); }
   };
 })();

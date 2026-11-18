@@ -1,7 +1,8 @@
 // طبقة البيانات: Firebase Realtime Database، أو «وضع التجربة» المحلي (BroadcastChannel)
 (function () {
   const cfg = window.FIREBASE_CONFIG || {};
-  const USE_FIREBASE = !!(cfg.apiKey && cfg.databaseURL);
+  const FORCE_LOCAL = new URLSearchParams(location.search).has("local"); // ?local=1 للتجربة على نفس المتصفح
+  const USE_FIREBASE = !FORCE_LOCAL && !!(cfg.apiKey && cfg.databaseURL);
 
   function splitPath(p) { return (p || "").split("/").filter(Boolean); }
   function getAt(tree, path) {
@@ -118,7 +119,7 @@
   }
 
   window.DB = {
-    USE_FIREBASE,
+    USE_FIREBASE, FORCE_LOCAL,
     connect(room, isServer) { return USE_FIREBASE ? FirebaseDB(room) : LocalDB(room, isServer); }
   };
 })();

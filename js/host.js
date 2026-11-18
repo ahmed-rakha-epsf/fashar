@@ -1,12 +1,13 @@
-// شاشة المذيع
+// شاشة المذيع (دي اللي بتتعمل شير سكرين)
 (function () {
   const ROUNDS = 3;          // عدد الجولات الأساسية
   const WRITE_SEC = 50;      // وقت كتابة الكدبة
   const VOTE_SEC = 30;       // وقت الاختيار
+  const AUTO_MS = 9000;      // الكشف التلقائي (لو المذيع شغّله): وقت كل خطوة
   const Q = window.QUESTIONS;
   const $ = id => document.getElementById(id);
   const stage = $("stage");
-  const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const esc = UI.esc, plus = UI.plus;
   const sleepers = new Set();
   function sleep(ms) { return new Promise(res => { const t = setTimeout(() => { sleepers.delete(o); res(); }, ms); const o = { t, res }; sleepers.add(o); }); }
   function skip() { for (const o of [...sleepers]) { clearTimeout(o.t); sleepers.delete(o); o.res(); } }
@@ -17,11 +18,11 @@
   let room = params.get("room") || localStorage.getItem("fishar_host_room");
   if (!room || params.has("new")) room = newCode();
   localStorage.setItem("fishar_host_room", room);
-  if (params.has("new")) history.replaceState(null, "", location.pathname);
+  if (params.has("new")) history.replaceState(null, "", location.pathname + (DB.FORCE_LOCAL ? "?local=1" : ""));
   const db = DB.connect(room, true);
   const base = location.href.split("#")[0].split("?")[0].replace(/[^/]*$/, "");
-  const joinUrl = base + "play.html?room=" + room;
-  $("roomLabel").textContent = "كود الغرفة: " + room;
+  const joinUrl = base + "play.html?room=" + room + (DB.FORCE_LOCAL ? "&local=1" : "");
+  $("roomLabel").innerHTML = `كود الغرفة <b>${room}</b>`;
   if (db.mode === "local") $("modeBadge").classList.remove("hidden");
   const alertBox = $("alert");
   const showAlert = html => { alertBox.innerHTML = html; alertBox.classList.remove("hidden"); };
@@ -35,8 +36,9 @@
 
   // ---------- الحالة ----------
   let S = null, players = {}, scores = {}, stats = {};
-  let lies = {}, votes = {}, options = null;
-  let roundSubs = [], subRound = -1, renderedKey = "", ending = false, revealRunning = false;
+  let lies = {}, votes = {}, options = null, script = null;
+  let roundSubs = [], subRound = -1, renderedKey = "", ending = false;
+  let autoOn = localStorage.getItem("fishar_auto") === "1";
 
   db.on("players", v => { const before = Object.keys(players).length; players = v || {}; if (Object.keys(players).length > before && S && S.phase === "lobby") SFX.join(); refresh(); });
   db.on("scores", v => { scores = v || {}; });
@@ -51,19 +53,24 @@
   function subscribeRound(r) {
     if (r === subRound) return;
     roundSubs.forEach(u => u()); roundSubs = []; subRound = r;
-    lies = {}; votes = {}; options = null;
+    lies = {}; votes = {}; options = null; script = null;
     roundSubs.push(db.on(`r${r}/lies`, v => { lies = v || {}; onLies(); refresh(); }));
     roundSubs.push(db.on(`r${r}/votes`, v => { votes = v || {}; refresh(); checkAllDone(); }));
     roundSubs.push(db.on(`r${r}/options`, v => { options = v; refresh(); }));
+    roundSubs.push(db.on(`r${r}/script`, v => { script = v; refresh(); }));
   }
 
-  const name = pid => (players[pid] && players[pid].name) || "؟";
-  const pids = () => Object.keys(players).sort((a, b) => (players[a].joined || 0) - (players[b].joined || 0));
+  const name = pid => UI.nameOf(players, pid);
+  const chip = (p, cls, extra) => UI.chip(players, p, cls, extra);
+  const namesOf = list => UI.names(players, list);
+  const pids = () => UI.order(players);
   const onlinePids = () => pids().filter(p => players[p].online !== false);
   const mult = r => (r >= 2 ? 2 : 1);
-  const curQ = () => Q[S.qIndex];
+  const curQ = () => Q[S.qIndex] || { prompt: S.prompt, hint: S.hint, truth: "" };
   function nextQ(used) { for (let i = 0; i < Q.length; i++) if (!used.includes(i)) return i; return Math.floor(Math.random() * Q.length); }
-  function promptHTML(p) { return esc(p).replace("____", '<span class="blank">؟</span>'); }
+  function promptHTML(p, fill) {
+    return esc(p).replace("____", fill != null ? `<span class="blank filled">${esc(fill)}</span>` : '<span class="blank">؟؟</span>');
+  }
   function metaKey(r) { return `fishar_meta_${room}_${r}`; }
 
   // ---------- الانتقالات ----------
@@ -79,15 +86,16 @@
     await db.set("state", { phase: "intro", round: r, qIndex: qi, usedQ: used.concat([qi]), leaders, prompt: Q[qi].prompt, hint: Q[qi].hint, mult: mult(r) });
   }
   async function startWrite() {
+    if (!S || S.phase !== "intro") return;
     ending = false;
-    await db.update({ "state/phase": "write", "state/endsAt": db.now() + WRITE_SEC * 1000 });
+    await db.update({ "state/phase": "write", "state/endsAt": db.now() + WRITE_SEC * 1000, "state/total": WRITE_SEC * 1000 });
   }
   async function swapQuestion() {
     if (!S || !["intro", "write"].includes(S.phase)) return;
     const qi = nextQ(S.usedQ || []);
     const upd = { "state/qIndex": qi, "state/usedQ": (S.usedQ || []).concat([qi]), "state/prompt": Q[qi].prompt, "state/hint": Q[qi].hint };
     upd[`r${S.round}/lies`] = null; upd[`r${S.round}/rej`] = null;
-    if (S.phase === "write") upd["state/endsAt"] = db.now() + WRITE_SEC * 1000;
+    if (S.phase === "write") { upd["state/endsAt"] = db.now() + WRITE_SEC * 1000; upd["state/total"] = WRITE_SEC * 1000; }
     renderedKey = "";
     await db.update(upd);
   }
@@ -135,7 +143,7 @@
     list.forEach((o, i) => { if (o.bot) bots.push(i); });
     localStorage.setItem(metaKey(r), JSON.stringify({ ti, bots }));
     const clean = list.map(o => ({ t: o.t, a: o.a.length ? o.a : ["-"] }));
-    await db.update({ [`r${r}/options`]: clean, "state/phase": "vote", "state/endsAt": db.now() + VOTE_SEC * 1000 });
+    await db.update({ [`r${r}/options`]: clean, "state/phase": "vote", "state/endsAt": db.now() + VOTE_SEC * 1000, "state/total": VOTE_SEC * 1000 });
     ending = false;
   }
 
@@ -145,9 +153,25 @@
     return { ti, bots: [] };
   }
 
+  const authorsOf = o => ((o && o.a) || []).filter(x => x !== "-");
+  const votersOf = i => pids().concat(Object.keys(votes).filter(v => !players[v])).filter(v => votes[v] === i);
+
+  // سيناريو الكشف: كل خطوة بتستنى المذيع يدوس «التالي»
+  function buildScript(ti, bots) {
+    const opts = (options || []).map((o, i) => ({ i, a: authorsOf(o), v: votersOf(i).length }));
+    const sc = [{ k: "intro" }];
+    opts.filter(o => o.i !== ti && o.v).sort((a, b) => a.v - b.v || a.i - b.i).forEach(o => {
+      const bot = bots.includes(o.i) || !o.a.length;
+      sc.push({ k: "lie", o: o.i, s: 0, bot }, { k: "lie", o: o.i, s: 1, bot });
+    });
+    if (opts.some(o => o.i !== ti && !o.v && o.a.length)) sc.push({ k: "nobody" });
+    if (ti >= 0) sc.push({ k: "drum" }, { k: "truth", o: ti });
+    return sc;
+  }
+
   async function endVote() {
     if (ending || S.phase !== "vote") return; ending = true;
-    const r = S.round, m = mult(r), { ti } = readMeta(r);
+    const r = S.round, m = mult(r), { ti, bots } = readMeta(r);
     const gain = {}, st = JSON.parse(JSON.stringify(stats || {}));
     const add = (p, n) => { gain[p] = (gain[p] || 0) + n; };
     const bump = (p, k) => { st[p] = st[p] || { fooled: 0, found: 0, gullible: 0 }; st[p][k] = (st[p][k] || 0) + 1; };
@@ -162,8 +186,8 @@
         if (leaders.includes(v)) add(a, 3);
       }
     }
-    const upd = { "state/phase": "reveal", [`r${r}/gain`]: gain, stats: st };
-    for (const p of pids()) upd[`scores/${p}`] = (scores[p] || 0) + (gain[p] || 0);
+    const upd = { "state/phase": "reveal", "state/rstep": 0, [`r${r}/gain`]: gain, [`r${r}/script`]: buildScript(ti, bots || []), [`r${r}/ti`]: ti, stats: st };
+    for (const p of pids()) { upd[`scores/${p}`] = (scores[p] || 0) + (gain[p] || 0); upd[`prev/${p}`] = scores[p] || 0; }
     await db.update(upd);
     ending = false;
   }
@@ -174,94 +198,150 @@
     const best = (fn) => { const max = Math.max(0, ...ps.map(fn)); return max > 0 ? { who: ps.filter(p => fn(p) === max), max } : null; };
     const s = p => scores[p] || 0, f = p => (stats[p] || {}).fooled || 0, d = p => (stats[p] || {}).found || 0, g = p => (stats[p] || {}).gullible || 0;
     const awards = [];
-    const add = (key, em, title, res, unit) => { if (res) awards.push({ key, em, title, who: res.who, v: res.max + " " + unit }); };
-    add("liar", "😈", "أكبر فشّار في التيم", best(f), "واحد صدّقوه");
-    add("detector", "🕵️", "كاشف الكدب", best(d), "مرة لقى الحقيقة");
-    add("kind", "🤍", "أطيب قلب في التيم", best(g), "مرة صدّق");
-    add("champ", "🏆", "بطل الفشّار", best(s), "نقطة");
+    const add = (key, em, title, desc, res, unit) => { if (res) awards.push({ key, em, title, desc, who: res.who, v: res.max + " " + unit }); };
+    add("liar", "😈", "أكبر فشّار في التيم", "أكتر واحد الناس صدّقت كدبه", best(f), "مرة صدّقوه");
+    add("detector", "🕵️", "كاشف الكدب", "أكتر واحد لقى الحقيقة", best(d), "مرة لقى الحقيقة");
+    add("kind", "🤍", "أطيب قلب في التيم", "أكتر واحد صدّق كدب زمايله", best(g), "مرة صدّق");
+    add("champ", "🏆", "بطل الفشّار", "صاحب أعلى نقط", best(s), "نقطة");
     await db.update({ awards, "state/phase": "final" });
   }
   async function newGame() {
     skip();
     if (db.mode === "local" && db.wipe) db.wipe();
-    location.href = location.pathname + "?new=1";
+    location.href = location.pathname + "?new=1" + (DB.FORCE_LOCAL ? "&local=1" : "");
+  }
+
+  // زرار «التالي» في الكشف
+  let lastAdvance = 0;
+  function advance() {
+    if (!S || S.phase !== "reveal" || !script) return;
+    const now = Date.now(); if (now - lastAdvance < 450) return; lastAdvance = now;
+    const st = S.rstep || 0;
+    if (st < script.length - 1) db.update({ "state/rstep": st + 1 });
   }
 
   // ---------- العرض ----------
   function refresh() {
     if (!S) return;
-    const key = [S.phase, S.round, S.qIndex, S.phase === "vote" ? (options || []).length : ""].join("|");
+    const ph = S.phase;
+    const key = [ph, S.round, S.qIndex, ph === "vote" ? (options || []).length : "", ph === "reveal" ? (script ? "s" : "-") + (S.rstep || 0) : ""].join("|");
     if (key !== renderedKey) { renderedKey = key; renderPhase(); }
     updateDynamic();
     updateControls();
   }
 
+  const PHASES = {
+    lobby: ["👋", "مستنيين الناس تدخل"], intro: ["📣", "جولة جديدة"], write: ["✍️", "اكتبوا كدبة"],
+    vote: ["🕵️", "دوّروا على الحقيقة"], reveal: ["👀", "الكشف"], scores: ["🏆", "الترتيب"], final: ["🎉", "الجوايز"]
+  };
   function updateControls() {
     const ph = S.phase;
     $("btnPlus").classList.toggle("hidden", !["write", "vote"].includes(ph));
     $("btnEnd").classList.toggle("hidden", !["write", "vote"].includes(ph));
     $("btnSwap").classList.toggle("hidden", !["intro", "write"].includes(ph));
+    $("btnAuto").classList.toggle("hidden", ph !== "reveal");
+    $("btnAuto").classList.toggle("on", autoOn);
+    $("btnAuto").textContent = autoOn ? "⏯ الكشف تلقائي: شغّال" : "⏯ الكشف تلقائي: مقفول";
+    const r = S.round, inGame = !["lobby", "final"].includes(ph);
+    const roundTxt = inGame ? `الجولة ${r + 1}${r < ROUNDS ? " من " + ROUNDS : " (زيادة)"}${r === 1 ? " · 👑" : r >= 2 ? " · ×2 🔥" : ""}` : "";
+    const p = PHASES[ph] || ["", ""];
+    const html = (roundTxt ? `<span class="pill round">${roundTxt}</span>` : "") + `<span class="pill phase">${p[0]} ${p[1]}</span>`;
+    if ($("phaseInfo").innerHTML !== html) $("phaseInfo").innerHTML = html;
   }
 
   function qrSVG(text) {
     const qr = new QRLib.QRCode(-1, QRLib.ECL.M); qr.addData(text); qr.make();
     const n = qr.getModuleCount(); let d = "";
     for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (qr.isDark(r, c)) d += `M${c} ${r}h1v1h-1z`;
-    return `<svg viewBox="-2 -2 ${n + 4} ${n + 4}" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges"><rect x="-2" y="-2" width="${n + 4}" height="${n + 4}" fill="#fff"/><path d="${d}" fill="#17112b"/></svg>`;
+    return `<svg viewBox="-2 -2 ${n + 4} ${n + 4}" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges"><rect x="-2" y="-2" width="${n + 4}" height="${n + 4}" fill="#fff"/><path d="${d}" fill="#1d1533"/></svg>`;
   }
 
-  function roundBadge() {
-    const r = S.round;
-    const label = r === 1 ? " · 👑 اصطاد المتصدر" : r >= 2 ? " · النقط ×2 🔥" : "";
-    return `<div class="round-badge">الجولة <b>${r + 1}</b>${r < ROUNDS ? " من " + ROUNDS : " (زيادة)"}${label}</div>`;
-  }
+  const ptsLine = m => `<span class="pt"><i>✅</i> لقيت الحقيقة = <b>${plus(2 * m)}</b></span><span class="pt"><i>😈</i> كل واحد صدّق كدبتك = <b>${plus(m)}</b></span>`;
+  const nextBar = (inner) => `<div class="nextbar">${inner}</div>`;
+  const keyHint = `<span class="keyhint">أو دوس <kbd>مسافة</kbd></span>`;
+  const timerHTML = () => `<div class="ring" id="ring"><svg viewBox="0 0 120 120"><circle class="bg" cx="60" cy="60" r="52"/><circle class="fg" id="ringfg" cx="60" cy="60" r="52"/></svg><div class="num" id="tnum"></div><div class="lbl">ثانية</div></div>`;
 
   function renderPhase() {
-    skip();
-    const ph = S.phase;
+    skip(); clearTimeout(autoTimer);
+    const ph = S.phase, r = S.round;
+    stage.className = "stage ph-" + ph;
+    if (ph !== "reveal") revealShell = null;
     if (ph === "lobby") {
       stage.innerHTML = `
         <div class="lobby">
-          <div class="qrbox">${qrSVG(joinUrl)}</div>
-          <div>
-            <h1>الفشّار 🤥</h1>
-            <div class="tag">امسح الكود بموبايلك أو افتح اللينك… واكتب اسمك</div>
-            <div class="link">${esc(joinUrl)}</div>
+          <div class="joinbox sticker tilt-r">
+            <div class="qrbox">${qrSVG(joinUrl)}</div>
+            <div class="jl">📱 امسح الكود بكاميرا الموبايل</div>
+            <div class="or">أو افتح اللينك ده</div>
+            <div class="link">${esc(joinUrl.replace(/^https?:\/\//, ""))}</div>
+            <div class="code">كود الغرفة: <b>${room}</b></div>
+          </div>
+          <div class="lobby-main">
+            <h1 class="title">الفشّار <span class="wob">🤥</span></h1>
+            <div class="tagline">لعبة الكدب الحلو قبل الميتينج</div>
+            <div class="howto">
+              <div class="hstep"><b>1</b><span class="e">✍️</span><span>اكتب كدبة تبان حقيقية</span></div>
+              <div class="hstep"><b>2</b><span class="e">🕵️</span><span>دوّر على الحقيقة وسط الكدب</span></div>
+              <div class="hstep"><b>3</b><span class="e">😈</span><span>كل واحد يصدّقك = نقطة ليك</span></div>
+            </div>
             ${db.mode === "local" ? `<div class="localnote">⚠️ اللعبة شغالة في <b>وضع التجربة</b>: اللاعبين لازم يفتحوا اللينك في تابات تانية <b>في نفس المتصفح ده</b>. الموبايلات مش هتظهر هنا غير بعد ما تحط إعدادات Firebase في js/config.js وترفع على GitHub.</div>` : ""}
+            <div class="lp-head">اللي دخلوا: <b id="pcount">0</b></div>
             <div class="names" id="names"></div>
-            <button class="btn" id="btnStart" style="font-size:26px;padding:16px 40px">يلا نبدأ 🚀</button>
+            <div class="startrow"><button class="btn huge" id="btnStart">يلا نبدأ 🚀</button><span class="keyhint" id="startHint"></span></div>
           </div>
         </div>`;
       $("btnStart").onclick = () => { SFX.unlock(); startIntro(0); };
     } else if (ph === "intro") {
-      const r = S.round;
-      let big, sub, rule = "";
-      if (r === 0) { big = "الجولة الأولى"; sub = "هقولكم معلومة غريبة… بس حقيقية 100%"; rule = "كل واحد يكتب كدبة تبان حقيقية · لو لقيت الحقيقة = 2 نقطة · كل واحد يصدّق كدبتك = نقطة"; }
-      else if (r === 1) {
-        big = "👑 اصطاد المتصدر";
-        const ls = (S.leaders || []).map(name);
-        sub = ls.length ? `المتصدر دلوقتي: <span class="leaders">${ls.map(esc).join(" و ")}</span>` : "لسه مفيش متصدر… العبوا عادي";
-        rule = ls.length ? "اللي يضحك على المتصدر بكدبته ياخد +3 بونص 🎯" : "";
-      } else if (r === 2) { big = "الجولة الأخيرة 🔥"; sub = "كل النقط ×2… أي حد لسه يقدر يكسب"; }
-      else { big = "جولة زيادة 🔥"; sub = "والنقط لسه ×2"; }
-      stage.innerHTML = `<div class="intro pop"><div class="big">${big}</div><div class="sub">${sub}</div><div class="rule">${rule}</div>
-        <div style="margin-top:40px"><button class="btn" id="btnGo" style="font-size:26px;padding:16px 40px">اكتبوا كدبكم ✍️</button></div></div>`;
+      const ls = S.leaders || [], m = mult(r);
+      let title, body;
+      if (r === 0) {
+        title = "الجولة الأولى";
+        body = `<div class="rule-card">هقولكم معلومة <b>غريبة… بس حقيقية 100%</b> وفيها كلمة ناقصة</div>
+          <div class="steps3">
+            <div class="s3"><span class="e">✍️</span><b>اكتب كدبة</b><small>إجابة غلط تبان حقيقية</small></div>
+            <div class="arrow">←</div>
+            <div class="s3"><span class="e">🕵️</span><b>اختار الحقيقة</b><small>وسط كدب زمايلك</small></div>
+            <div class="arrow">←</div>
+            <div class="s3"><span class="e">🏆</span><b>اجمع نقط</b><small>من الحقيقة ومن اللي صدّقوك</small></div>
+          </div>
+          <div class="ptsline">${ptsLine(m)}</div>`;
+      } else if (r === 1) {
+        title = "👑 اصطاد المتصدر";
+        body = ls.length
+          ? `<div class="rule-card">المتصدر دلوقتي:</div><div class="leaders">${ls.map(p => chip(p, "big crown")).join("")}</div>
+             <div class="rule-card hot">🎯 لو المتصدر صدّق كدبتك تاخد <b>${plus(3)} بونص</b>… اكتبوا كدبة على مقاسه!</div>`
+          : `<div class="rule-card">لسه مفيش متصدر… العبوا عادي 😄</div>`;
+        body += `<div class="ptsline">${ptsLine(m)}</div>`;
+      } else {
+        title = r === 2 ? "الجولة الأخيرة" : "جولة زيادة";
+        body = `<div class="x2 sticker tilt-l">النقط ×2 🔥</div><div class="rule-card">أي حد لسه يقدر يكسب… ركّزوا!</div><div class="ptsline">${ptsLine(m)}</div>`;
+      }
+      stage.innerHTML = `<div class="intro">
+          <div class="round-num pop">الجولة ${r + 1}${r < ROUNDS ? " من " + ROUNDS : ""}</div>
+          <div class="big pop d1">${title}</div>
+          <div class="pop d2">${body}</div>
+        </div>
+        ${nextBar(`<button class="btn huge" id="btnGo" data-primary>يلا نبدأ نكتب ✍️</button>${keyHint}`)}`;
       $("btnGo").onclick = () => { SFX.unlock(); startWrite(); };
+      SFX.whoosh();
     } else if (ph === "write") {
-      stage.innerHTML = `${roundBadge()}
-        <div class="prompt pop">${promptHTML(S.prompt)}</div>
-        <div class="hint">(${esc(S.hint)}) · اكتبوا كدبة مقنعة على موبايلاتكم</div>
-        <div class="timerwrap"><div class="timerbar" id="tbar"><i></i></div><div class="num" id="tnum"></div></div>
-        <div class="statusrow" id="status"></div>`;
+      const ls = S.leaders || [];
+      stage.innerHTML = `
+        <div class="qcard sticker pop"><div class="q">${promptHTML(S.prompt)}</div><div class="qhint">${esc(S.hint)}</div></div>
+        <div class="instr drop"><span class="big-e">📱</span><span>اكتبوا على موبايلاتكم إجابة <u>غلط</u>… بس تبان حقيقية، عشان تضحكوا بيها على الباقيين</span></div>
+        ${r === 1 && ls.length ? `<div class="instr hot drop">🎯 اللي يضحك على ${namesOf(ls)} ياخد ${plus(3)}</div>` : ""}
+        <div class="botrow">${timerHTML()}<div class="statusbox"><div class="stc" id="stc"></div><div class="statusrow" id="status"></div></div></div>`;
+      SFX.whoosh();
     } else if (ph === "vote") {
-      const opts = options || [];
-      stage.innerHTML = `${roundBadge()}
-        <div class="prompt sm">${promptHTML(S.prompt)}</div>
-        <div class="opts ${opts.length > 8 ? "many" : ""}">${opts.map((o, i) => `<div class="opt" style="animation-delay:${i * 60}ms"><span class="n">${i + 1}</span>${esc(o.t)}</div>`).join("")}</div>
-        <div class="timerwrap"><div class="timerbar" id="tbar"><i></i></div><div class="num" id="tnum"></div></div>
-        <div class="statusrow" id="status"></div>`;
+      const opts = options || [], m = mult(r);
+      stage.innerHTML = `
+        <div class="qcard sticker small"><div class="q">${promptHTML(S.prompt)}</div></div>
+        <div class="instr drop"><span class="big-e">📱</span><span>فيهم إجابة <b>واحدة بس صح</b>… اختاروها من موبايلاتكم <span class="muted">(لقيتها = ${plus(2 * m)})</span></span></div>
+        <div class="opts ${opts.length > 8 ? "many" : ""} ${opts.length <= 4 ? "few" : ""}">${opts.map((o, i) => `<div class="opt" style="animation-delay:${i * 90}ms"><span class="n">${i + 1}</span><span class="t">${esc(o.t)}</span></div>`).join("")}</div>
+        <div class="botrow">${timerHTML()}<div class="statusbox"><div class="stc" id="stc"></div><div class="statusrow" id="status"></div></div></div>`;
+      SFX.whoosh();
     } else if (ph === "reveal") {
-      runReveal();
+      renderReveal();
     } else if (ph === "scores") {
       renderScores();
     } else if (ph === "final") {
@@ -274,144 +354,282 @@
     if (!S) return;
     if (S.phase === "lobby" && $("names")) {
       const ps = pids();
-      $("names").innerHTML = ps.length ? ps.map(p => `<span class="chip ${players[p].online === false ? "off" : ""}">${esc(name(p))}</span>`).join("") : `<span class="pmuted" style="font-size:22px;color:var(--muted)">مستنيين أول واحد يدخل… 👀</span>`;
+      const html = ps.length ? ps.map(p => chip(p, "big pop" + (players[p].online === false ? " off" : ""))).join("") : `<span class="waiting">مستنيين أول واحد يدخل… 👀</span>`;
+      if ($("names").innerHTML !== html) $("names").innerHTML = html;
+      $("pcount").textContent = ps.length;
       $("btnStart").disabled = ps.length < 2;
+      $("startHint").textContent = ps.length < 2 ? "محتاجين 2 على الأقل" : "";
     }
     if ((S.phase === "write" || S.phase === "vote") && $("status")) {
       const done = p => S.phase === "write" ? !!(lies[p] && lies[p].final) : (votes[p] !== undefined && votes[p] !== null);
-      $("status").innerHTML = pids().map(p => `<span class="chip ${done(p) ? "done" : ""} ${players[p].online === false ? "off" : ""}">${esc(name(p))}</span>`).join("");
+      const typing = p => S.phase === "write" && lies[p] && !lies[p].final && lies[p].text;
+      const html = pids().map(p => chip(p, (done(p) ? "done" : typing(p) ? "typing" : "") + (players[p].online === false ? " off" : ""), done(p) ? `<i class="st">✅</i>` : typing(p) ? `<i class="st">✏️</i>` : `<i class="st">⏳</i>`)).join("");
+      if ($("status").innerHTML !== html) $("status").innerHTML = html;
+      const on = onlinePids(), n = on.filter(done).length;
+      $("stc").innerHTML = S.phase === "write" ? `<b>${n}</b> من ${on.length} بعتوا كدبتهم` : `<b>${n}</b> من ${on.length} اختاروا`;
     }
   }
 
   setInterval(() => {
     if (!S || !["write", "vote"].includes(S.phase) || !S.endsAt) return;
     const left = Math.max(0, S.endsAt - db.now());
-    const total = (S.phase === "write" ? WRITE_SEC : VOTE_SEC) * 1000;
+    const total = S.total || (S.phase === "write" ? WRITE_SEC : VOTE_SEC) * 1000;
     const sec = Math.ceil(left / 1000);
-    const bar = $("tbar"), num = $("tnum");
-    if (bar) { bar.firstElementChild.style.width = Math.min(100, (left / total) * 100) + "%"; bar.classList.toggle("hurry", sec <= 10); }
-    if (num) { num.textContent = sec; num.classList.toggle("hurry", sec <= 5 && sec > 0); }
+    const fg = $("ringfg"), num = $("tnum"), ring = $("ring");
+    if (fg) fg.style.strokeDashoffset = (326.7 * (1 - Math.min(1, left / total))).toFixed(1);
+    if (num && num.textContent !== String(sec)) num.textContent = sec;
+    if (ring) { ring.classList.toggle("hurry", sec <= 10); ring.classList.toggle("panic", sec <= 5 && sec > 0); }
     if (sec <= 5 && sec > 0 && sec !== lastTick) { lastTick = sec; SFX.tick(); }
+    else if (sec <= 10 && sec > 5 && sec !== lastTick) { lastTick = sec; SFX.heart(); }
     if (left <= 0) { if (S.phase === "write") endWrite(); else endVote(); }
   }, 250);
 
-  // ---------- الكشف ----------
-  async function runReveal() {
-    if (revealRunning) return; revealRunning = true;
-    const myKey = renderedKey;
-    const alive = () => renderedKey === myKey;
-    try {
-      let tries = 0;
-      while ((!options || !Object.keys(votes).length && tries < 6) && tries < 20) { await sleep(150); tries++; }
-      const r = S.round, m = mult(r), { ti, bots } = readMeta(r);
-      const opts = (options || []).map((o, i) => ({ i, t: o.t, a: (o.a || []).filter(x => x !== "-"), voters: Object.keys(votes).filter(v => votes[v] === i) }));
-      const leaders = r === 1 ? (S.leaders || []) : [];
-      const liesWithVotes = opts.filter(o => o.i !== ti && o.voters.length).sort((a, b) => a.voters.length - b.voters.length);
-      const nobody = opts.filter(o => o.i !== ti && !o.voters.length && o.a.length);
-      const truth = opts[ti];
-
-      stage.innerHTML = `${roundBadge()}<div class="prompt sm">${promptHTML(S.prompt)}</div><div class="reveal" id="rv" style="margin-top:26px"></div>
-        <div class="controls-bottom"><button class="btn ghost small" id="btnSkip">التالي ⏭</button></div>`;
-      $("btnSkip").onclick = skip;
-      const rv = $("rv");
-
-      for (const o of liesWithVotes) {
-        if (!alive()) return;
-        const isBot = bots.includes(o.i) || !o.a.length;
-        rv.innerHTML = `<div class="rcard" id="card"><div class="label">مين صدّق دي؟ 🤔</div><div class="lie">${esc(o.t)}</div>
-          <div class="voters" id="vs"></div><div class="count" id="cnt"></div><div id="stp"></div><div class="hunt" id="hunt"></div></div>`;
-        SFX.pop(); await sleep(1400);
-        for (const v of o.voters) { if (!alive()) return; $("vs").insertAdjacentHTML("beforeend", `<span class="chip">${esc(name(v))}</span>`); SFX.voter(); await sleep(380); }
-        $("cnt").textContent = o.voters.length === 1 ? "واحد بس صدّقها 😅" : `${o.voters.length} صدّقوها! 😱`;
-        await sleep(1100); if (!alive()) return;
-        if (isBot) {
-          $("stp").innerHTML = `<div class="stamp bot">🤖 دي كدبة جاهزة!</div>`;
-        } else {
-          const hunters = o.voters.filter(v => leaders.includes(v));
-          const pts = o.voters.length * m + hunters.length * 3;
-          $("stp").innerHTML = `<div class="stamp">😈 كتبها ${o.a.map(a => esc(name(a))).join(" و ")} +${pts}</div>`;
-          if (hunters.length) { $("hunt").innerHTML = `🎯 المتصدر ${hunters.map(h => esc(name(h))).join(" و ")} وقع في الفخ! +3`; $("card").classList.add("hunt-hit"); }
-        }
-        SFX.stamp();
-        if (o.voters.length >= 3 && !isBot) { $("card").classList.add("fire"); SFX.laugh(); }
-        await sleep(2600);
-      }
-      if (!alive()) return;
-      if (nobody.length) {
-        rv.innerHTML = `<div class="rcard"><div class="label">ودول محدش صدّقهم 😅</div>
-          <div class="nobody">${nobody.map(o => `<div class="item">${esc(o.t)}<small>${o.a.map(a => esc(name(a))).join(" و ")}</small></div>`).join("")}</div></div>`;
-        SFX.pop(); await sleep(3800);
-      }
-      if (!alive()) return;
-      rv.innerHTML = `<div class="rcard"><div class="drum">والحقيقة يا جماعة… 🥁</div></div>`;
-      SFX.drum(); await sleep(1800);
-      if (!alive() || !truth) return;
-      const finders = truth.voters;
-      rv.innerHTML = `<div class="rcard truth"><div class="label">✅ الحقيقة</div><div class="lie">${esc(truth.t)}</div>
-        <div class="voters">${finders.map(v => `<span class="chip done">${esc(name(v))}</span>`).join("")}</div>
-        <div class="count">${finders.length ? `اللي لقوها: +${2 * m} لكل واحد` : "ولا حد لقاها! 😂 الفشّارين كسبوا"}</div></div>`;
-      SFX.ding();
-      $("btnSkip").outerHTML = `<button class="btn" id="btnBoard" style="font-size:22px">الترتيب 🏆</button>`;
-      $("btnBoard").onclick = toScores;
-    } finally { revealRunning = false; }
+  // ---------- الكشف (خطوة بخطوة بالزرار) ----------
+  let revealShell = null, autoTimer = null;
+  function lieMeta(i) {
+    const o = (options || [])[i] || { t: "", a: [] };
+    const r = S.round, m = mult(r), leaders = r === 1 ? (S.leaders || []) : [];
+    const a = authorsOf(o), v = votersOf(i), hunters = v.filter(x => leaders.includes(x));
+    return { t: o.t, a, v, hunters, pts: v.length * m + hunters.length * 3 };
   }
 
-  function renderScores() {
+  function renderReveal() {
     const r = S.round;
-    db.get(`r${r}/gain`).then(gain => {
-      gain = gain || {};
-      const ps = pids().sort((a, b) => (scores[b] || 0) - (scores[a] || 0));
-      const top = scores[ps[0]] || 0;
+    if (!script || !options) { stage.innerHTML = `<div class="loading">⏳ لحظة…</div>`; revealShell = null; return; }
+    const stp = Math.min(S.rstep || 0, script.length - 1), it = script[stp];
+    // الهيكل ثابت طول الكشف (السؤال فوق + النقط + زرار التالي)، واللي بيتغير المحتوى بس
+    if (revealShell !== r || !$("rvb")) {
+      revealShell = r;
+      stage.innerHTML = `<div class="rv-top"><div class="qmini">${promptHTML(S.prompt)}</div><div class="rdots" id="rdots"></div></div>
+        <div class="rv-body" id="rvb"></div>
+        ${nextBar(`<button class="btn huge" id="btnStep" data-primary>التالي ⏭</button><span class="keyhint" id="khint">أو دوس <kbd>مسافة</kbd></span>`)}`;
+      $("btnStep").onclick = () => { SFX.unlock(); advance(); };
+    }
+    // نقط التقدم: كارت لكل إجابة + الحقيقة
+    const cards = []; script.forEach((x, i) => { if ((x.k === "lie" && x.s === 0) || x.k === "nobody" || x.k === "truth") cards.push(i); });
+    const curCard = cards.filter(i => i <= stp).length - 1;
+    $("rdots").innerHTML = cards.map((c, i) => `<i class="${i < curCard ? "past" : i === curCard ? "cur" : ""} ${script[c].k === "truth" ? "tr" : ""}"></i>`).join("");
+    const last = stp >= script.length - 1;
+    const nb = document.querySelector(".nextbar");
+    if (last) {
+      nb.innerHTML = `<button class="btn huge" id="btnBoard" data-primary>نشوف الترتيب 🏆</button>${keyHint}`;
+      $("btnBoard").onclick = toScores;
+    } else if (!$("btnStep")) {
+      nb.innerHTML = `<button class="btn huge" id="btnStep" data-primary>التالي ⏭</button>${keyHint}`;
+      $("btnStep").onclick = () => { SFX.unlock(); advance(); };
+    }
+    if ($("btnStep")) {
+      const nx = script[stp + 1];
+      $("btnStep").textContent = it.k === "lie" && it.s === 0 ? "اكشفها! 🔍" : nx && nx.k === "drum" ? "يلا نشوف الحقيقة 🥁" : it.k === "drum" ? "اكشف الحقيقة ✅" : "التالي ⏭";
+    }
+    const rvb = $("rvb"), m = mult(r);
+    if (it.k !== "truth") { const qm = promptHTML(S.prompt); const el = stage.querySelector(".qmini"); if (el.innerHTML !== qm) el.innerHTML = qm; }
+    if (it.k === "intro") {
+      rvb.innerHTML = `<div class="rv-intro">
+        <div class="big pop">يلا نشوف مين ضحك على مين 👀</div>
+        <div class="sub pop d1">هنعرض كل إجابة الناس اختاروها… ونكشف: <b class="pink">كدبة</b> ولا <b class="green">حقيقة</b>؟</div>
+        <div class="ptsline pop d2">${ptsLine(m)}${r === 1 && (S.leaders || []).length ? `<span class="pt"><i>🎯</i> المتصدر صدّقك = <b>${plus(3)}</b></span>` : ""}</div></div>`;
+      SFX.whoosh();
+    } else if (it.k === "lie") {
+      const L = lieMeta(it.o);
+      let card = rvb.querySelector(".rcard.lie");
+      const fresh = !(card && +card.dataset.o === it.o);
+      if (fresh) {
+        rvb.innerHTML = `<div class="rcard lie sticker pop" data-o="${it.o}">
+          <div class="rc-label">الإجابة دي…</div>
+          <div class="stamp-slot"></div><div class="rc-answer"><span class="txt">${esc(L.t)}</span></div>
+          <div class="rc-who"><span class="rc-k" id="vk">اختارها ${L.v.length === 1 ? "واحد" : L.v.length} 👇</span><div class="voters" id="vs"></div></div>
+          <div class="rc-result" id="rres"><div class="suspense">حقيقة ولا كدبة؟ 🤔</div></div></div>`;
+        card = rvb.querySelector(".rcard.lie");
+        SFX.pop();
+        if (it.s === 0) staggerVoters(L.v);
+        else $("vs").innerHTML = L.v.map(p => chip(p, "big")).join("");
+      }
+      if (it.s === 1) bust(card, L, it.bot, m);
+    } else if (it.k === "nobody") {
+      const items = (options || []).map((o, i) => ({ i, t: o.t, a: authorsOf(o) })).filter(o => o.i !== (script.find(x => x.k === "truth") || {}).o && o.a.length && !votersOf(o.i).length);
+      rvb.innerHTML = `<div class="rv-nobody"><div class="big2 pop">ودي كدبات محدش صدّقها 😅</div><div class="sub2 pop d1">مفيهاش نقط… المرة الجاية اكتبوا حاجة أقنع!</div>
+        <div class="nb-grid">${items.map((o, k) => `<div class="nb sticker pop" style="animation-delay:${200 + k * 120}ms"><div class="nt">${esc(o.t)}</div><div class="na">كتبها: ${o.a.map(p => chip(p)).join("")}</div></div>`).join("")}</div></div>`;
+      SFX.pop();
+    } else if (it.k === "drum") {
+      rvb.innerHTML = `<div class="rv-drum"><div class="drum-e">🥁</div><div class="big">والإجابة الصح هي…</div><div class="qbig sticker">${promptHTML(S.prompt)}</div></div>`;
+      SFX.drum();
+    } else if (it.k === "truth") {
+      const o = (options || [])[it.o] || { t: curQ().truth }, finders = votersOf(it.o);
+      stage.querySelector(".qmini").innerHTML = promptHTML(S.prompt, o.t);
+      rvb.innerHTML = `<div class="rcard truth sticker pop">
+        <div class="rc-label">✅ دي الحقيقة!</div>
+        <div class="rc-answer"><span class="txt">${esc(o.t)}</span></div>
+        ${curQ().story ? `<div class="story">💡 ${esc(curQ().story)}</div>` : `<div class="qfill">${promptHTML(S.prompt, o.t)}</div>`}
+        ${finders.length ? `<div class="rc-who"><span class="rc-k">اللي عرفوها 🕵️</span><div class="voters">${finders.map(p => chip(p, "big done")).join("")}</div></div>
+          <div class="points pop d2">${plus(2 * m)} لكل واحد فيهم 🎉</div>`
+          : `<div class="points sad pop d2">ولا حد عرفها! 😂 الفشّارين كسبوا الجولة</div>`}</div>`;
+      SFX.tada(); UI.confetti(finders.length ? 200 : 90, { sides: true });
+    }
+    scheduleAuto(last);
+  }
+
+  async function staggerVoters(list) {
+    const key = renderedKey;
+    await sleep(500);
+    for (const p of list) {
+      if (renderedKey !== key || !$("vs")) return;
+      $("vs").insertAdjacentHTML("beforeend", chip(p, "big drop"));
+      SFX.voter(); await sleep(420);
+    }
+  }
+
+  function bust(card, L, bot, m) {
+    $("vs").innerHTML = L.v.map(p => chip(p, "big")).join("");
+    card.classList.add("busted");
+    card.querySelector(".stamp-slot").innerHTML = `<div class="stamp">كدبة! 🤥</div>`;
+    $("vk").textContent = bot ? "صدّقوها 😅" : "اتضحك عليهم 😂";
+    let html;
+    if (bot) {
+      html = `<div class="verdict"><div class="vline"><span class="vk">🤖 الكدبة دي من عندنا</span><span class="muted">مش من حد فيكم… فمحدش أخد عليها نقط</span></div></div>`;
+    } else {
+      html = `<div class="verdict">
+        <div class="vline pop d1"><span class="vk">😈 كتبها:</span>${L.a.map(p => chip(p, "big author")).join("")}</div>
+        <div class="points pop d2">${plus(L.pts)} ${L.a.length > 1 ? "لكل واحد فيهم" : "ل" + esc(name(L.a[0]))}<small>(${L.v.length === 1 ? "واحد صدّقها" : L.v.length + " صدّقوها"}${m > 1 ? " × 2" : ""}${L.hunters.length ? " + بونص المتصدر" : ""})</small></div>
+        ${L.hunters.length ? `<div class="hunt pop d3">🎯 المتصدر ${namesOf(L.hunters)} وقع في الفخ! ${plus(3)} بونص</div>` : ""}
+      </div>`;
+      if (L.v.length >= 3) card.insertAdjacentHTML("beforeend", `<div class="fire">🔥 فشرة جامدة!</div>`);
+    }
+    $("rres").innerHTML = html;
+    SFX.buzz();
+    if (!bot) setTimeout(() => SFX.coin(), 650);
+    if (!bot && L.v.length >= 3) setTimeout(() => SFX.laugh(), 900);
+  }
+
+  function scheduleAuto(last) {
+    clearTimeout(autoTimer);
+    if (!autoOn || last || S.phase !== "reveal") return;
+    autoTimer = setTimeout(() => { if (autoOn) advance(); }, AUTO_MS);
+  }
+
+  // ---------- الترتيب ----------
+  function rankMap(list, val) { const m = {}; list.forEach((p, i) => { m[p] = i && val(list[i - 1]) === val(p) ? m[list[i - 1]] : i + 1; }); return m; }
+  function renderScores() {
+    const r = S.round, myKey = renderedKey;
+    Promise.all([db.get(`r${r}/gain`), db.get("prev")]).then(([gain, prev]) => {
+      if (renderedKey !== myKey) return;
+      gain = gain || {}; prev = prev || {};
+      const ps = pids();
+      const now = p => scores[p] || 0, before = p => (prev[p] !== undefined ? prev[p] : Math.max(0, now(p) - (gain[p] || 0)));
+      const oldO = ps.slice().sort((a, b) => before(b) - before(a) || ps.indexOf(a) - ps.indexOf(b));
+      const newO = ps.slice().sort((a, b) => now(b) - now(a) || oldO.indexOf(a) - oldO.indexOf(b));
+      const oldR = rankMap(oldO, before), newR = rankMap(newO, now);
+      const moved = new Set(ps.map(before)).size > 1; // أول جولة الكل كان صفر: مفيش «طلع/نزل»
+      const top = now(newO[0]);
       const lastMain = r >= ROUNDS - 1;
-      stage.innerHTML = `${roundBadge()}
-        <div class="board ${ps.length > 8 ? "compact" : ""}">${ps.map((p, i) => `
-          <div class="brow ${(scores[p] || 0) === top && top > 0 ? "first" : ""}" style="animation-delay:${i * 70}ms">
-            <div class="rank">${(scores[p] || 0) === top && top > 0 ? "👑" : i + 1}</div>
-            <div class="nm">${esc(name(p))}</div>
-            <div class="gain">${gain[p] ? "+" + gain[p] : ""}</div>
-            <div class="pts">${scores[p] || 0}</div>
-          </div>`).join("")}</div>
-        <div style="margin-top:26px;display:flex;gap:14px">
-          ${lastMain ? `<button class="btn ghost" id="btnExtra">جولة زيادة 🔁</button><button class="btn" id="btnFinal" style="font-size:24px">النتيجة النهائية 🏆</button>`
-                     : `<button class="btn" id="btnNext" style="font-size:24px">الجولة الجاية ⏭</button>`}
-        </div>`;
+      const n = ps.length, rowH = n > 8 ? 56 : n > 6 ? 66 : 76;
+      const nextLabel = r + 1 === 1 ? "الجولة الجاية: 👑 اصطاد المتصدر ⏭" : r + 1 === 2 ? "الجولة الأخيرة (النقط ×2) ⏭" : "الجولة الجاية ⏭";
+      stage.innerHTML = `<div class="sc-head pop">الترتيب بعد الجولة ${r + 1}</div>
+        <div class="board" style="height:${n * rowH}px;--rh:${rowH}px">${oldO.map((p, i) => {
+          const a = UI.avatar(players, p), d = moved ? (oldR[p] || 0) - (newR[p] || 0) : 0;
+          return `<div class="brow" data-p="${p}" style="top:${i * rowH}px;--c:${a.c}">
+            <div class="rank">${oldR[p]}</div><div class="av">${a.e}</div><div class="nm">${esc(name(p))}</div>
+            <div class="move ${d > 0 ? "up" : d < 0 ? "down" : ""}">${d > 0 ? "▲" + d : d < 0 ? "▼" + -d : ""}</div>
+            <div class="gain ${gain[p] ? "" : "zero"}">${plus(gain[p] || 0)}</div>
+            <div class="pts">${before(p)}</div></div>`;
+        }).join("")}</div>
+        ${nextBar(lastMain ? `<button class="btn ghost" id="btnExtra">جولة زيادة 🔁</button><button class="btn huge" id="btnFinal" data-primary>الجوايز والنتيجة النهائية 🏆</button>${keyHint}`
+                           : `<button class="btn huge" id="btnNext" data-primary>${nextLabel}</button>${keyHint}`)}`;
       if ($("btnNext")) $("btnNext").onclick = () => startIntro(r + 1);
       if ($("btnExtra")) $("btnExtra").onclick = () => startIntro(r + 1);
       if ($("btnFinal")) $("btnFinal").onclick = toFinal;
+      SFX.whoosh();
+      // 1) النقط الجديدة تطلع  2) العدّ يطلع  3) الصفوف تتحرك لمكانها الجديد
+      (async () => {
+        await sleep(700); if (renderedKey !== myKey) return;
+        stage.querySelectorAll(".brow").forEach(el => el.classList.add("show-gain"));
+        if (Object.values(gain).some(Boolean)) SFX.coin();
+        await sleep(600); if (renderedKey !== myKey) return;
+        const t0 = performance.now(), dur = 900;
+        const els = [...stage.querySelectorAll(".brow")];
+        const tickNums = () => {
+          const k = Math.min(1, (performance.now() - t0) / dur);
+          els.forEach(el => { const p = el.dataset.p; el.querySelector(".pts").textContent = Math.round(before(p) + (now(p) - before(p)) * k); });
+          if (k < 1 && renderedKey === myKey) requestAnimationFrame(tickNums);
+        };
+        requestAnimationFrame(tickNums);
+        setTimeout(() => els.forEach(el => { const p = el.dataset.p; el.querySelector(".pts").textContent = now(p); }), dur + 50);
+        await sleep(dur + 150); if (renderedKey !== myKey) return;
+        els.forEach(el => {
+          const p = el.dataset.p;
+          el.style.top = newO.indexOf(p) * rowH + "px";
+          el.querySelector(".rank").textContent = top > 0 && now(p) === top ? "👑" : newR[p];
+          el.classList.toggle("first", top > 0 && now(p) === top);
+          el.classList.add("moved");
+        });
+        SFX.pop();
+      })();
     });
   }
 
+  // ---------- الجوايز ----------
+  let aStep = 0, awardsCache = null;
   async function runFinal() {
     const myKey = renderedKey;
-    const awards = (await db.get("awards")) || [];
-    stage.innerHTML = `<div class="awards" id="aw"></div><div class="controls-bottom"><button class="btn ghost small" id="btnSkip2">التالي ⏭</button></div>`;
-    $("btnSkip2").onclick = skip;
-    const aw = $("aw");
-    for (const a of awards) {
-      if (renderedKey !== myKey) return;
-      const champ = a.key === "champ";
-      if (champ) { aw.insertAdjacentHTML("beforeend", `<div class="award champ"><div class="drum">والبطل… 🥁</div></div>`); SFX.drum(); await sleep(1900); aw.lastElementChild.remove(); }
-      aw.insertAdjacentHTML("beforeend", `<div class="award ${champ ? "champ" : ""}"><div class="em">${a.em}</div><div class="t">${esc(a.title)}</div>
-        <div class="w">${(a.who || []).map(p => esc(name(p))).join(" و ")}</div><div class="v">${esc(a.v)}</div></div>`);
-      champ ? SFX.fanfare() : SFX.stamp();
-      await sleep(champ ? 500 : 2200);
+    awardsCache = (await db.get("awards")) || [];
+    if (renderedKey !== myKey) return;
+    aStep = 0;
+    showAward();
+  }
+  function showAward() {
+    const aw = awardsCache || [];
+    const champIdx = aw.findIndex(a => a.key === "champ");
+    // خطوات: عنوان، كل جايزة، (طبلة قبل البطل)، الملخص
+    const steps = [{ k: "title" }];
+    aw.forEach((a, i) => { if (i === champIdx) steps.push({ k: "drum" }); steps.push({ k: "award", a }); });
+    steps.push({ k: "summary" });
+    const st = steps[Math.min(aStep, steps.length - 1)], last = aStep >= steps.length - 1;
+    const who = a => (a.who || []).map(p => chip(p, "huge")).join("");
+    let body = "";
+    if (st.k === "title") { body = `<div class="aw-title"><div class="big pop">🏅 جوايز الفشّار</div><div class="sub pop d1">مين كدب أحسن… ومين اتضحك عليه أكتر؟</div></div>`; SFX.whoosh(); }
+    else if (st.k === "drum") { body = `<div class="rv-drum"><div class="drum-e">🥁</div><div class="big">وبطل الفشّار هو…</div></div>`; SFX.drum(); }
+    else if (st.k === "award") {
+      const a = st.a, champ = a.key === "champ";
+      body = `<div class="award-big sticker pop ${champ ? "champ" : ""}"><div class="em">${a.em}</div><div class="t">${esc(a.title)}</div><div class="d">${esc(a.desc || "")}</div>
+        <div class="w">${who(a)}</div><div class="v">${esc(a.v)}</div></div>`;
+      if (champ) { SFX.fanfare(); UI.confetti(260, { sides: true }); setTimeout(() => UI.confetti(160), 900); } else SFX.stamp();
+    } else {
+      const champ = aw.find(a => a.key === "champ"), rest = aw.filter(a => a.key !== "champ");
+      body = `<div class="summary">
+        ${champ ? `<div class="award-big sticker champ small pop"><div class="em">🏆</div><div class="t">بطل الفشّار</div><div class="w">${who(champ)}</div><div class="v">${esc(champ.v)}</div></div>` : ""}
+        <div class="awards">${rest.map((a, i) => `<div class="award sticker pop" style="animation-delay:${200 + i * 150}ms"><div class="em">${a.em}</div><div class="t">${esc(a.title)}</div><div class="w">${(a.who || []).map(p => chip(p, "big")).join("")}</div><div class="v">${esc(a.v)}</div></div>`).join("")}</div>
+        <div class="thanks pop d3">شكراً إنكم لعبتوا 💛 يلا على الميتينج!</div></div>`;
+      UI.confetti(120);
     }
-    const b = $("btnSkip2"); if (b) b.remove();
+    stage.innerHTML = `<div class="final-body">${body}</div>${nextBar(last
+      ? `<button class="btn ghost" id="btnAgain">لعبة جديدة 🆕</button>`
+      : `<button class="btn huge" id="btnAward" data-primary>${steps[aStep + 1] && steps[aStep + 1].k === "summary" ? "الملخص 📋" : "الجايزة الجاية ⏭"}</button>${keyHint}`)}`;
+    if ($("btnAward")) $("btnAward").onclick = () => { aStep++; showAward(); };
+    if ($("btnAgain")) $("btnAgain").onclick = () => { if ($("btnAgain").dataset.armed) newGame(); else { $("btnAgain").dataset.armed = 1; $("btnAgain").textContent = "متأكد؟ دوس تاني"; } };
   }
 
   // ---------- الأزرار ----------
-  $("btnPlus").onclick = () => { if (S && S.endsAt) db.update({ "state/endsAt": Math.max(S.endsAt, db.now()) + 15000 }); };
+  $("btnPlus").onclick = () => { if (S && S.endsAt) { const ends = Math.max(S.endsAt, db.now()) + 15000; db.update({ "state/endsAt": ends, "state/total": Math.max(S.total || 0, ends - db.now()) }); } };
   $("btnEnd").onclick = () => { if (!S) return; if (S.phase === "write") endWrite(); else if (S.phase === "vote") endVote(); };
   $("btnSwap").onclick = swapQuestion;
   $("btnMute").onclick = () => { SFX.setMuted(!SFX.isMuted()); $("btnMute").textContent = SFX.isMuted() ? "🔇" : "🔊"; };
+  $("btnAuto").onclick = () => { autoOn = !autoOn; localStorage.setItem("fishar_auto", autoOn ? "1" : "0"); updateControls(); if (S && S.phase === "reveal" && script) scheduleAuto((S.rstep || 0) >= script.length - 1); };
   let newArmed = null;
   $("btnNew").onclick = () => {
     if (newArmed) { clearTimeout(newArmed); newGame(); return; }
     $("btnNew").textContent = "متأكد؟ دوس تاني";
     newArmed = setTimeout(() => { newArmed = null; $("btnNew").textContent = "🆕"; }, 3000);
   };
-  document.addEventListener("keydown", e => { if (e.key === "ArrowLeft" || e.key === " ") { if (e.target.tagName !== "INPUT") { e.preventDefault(); skip(); } } });
-  document.addEventListener("click", () => SFX.unlock(), { once: true });
+  // مسافة / الأسهم / زرار الريموت (PageDown) = الزرار الأساسي اللي على الشاشة
+  let lastKey = 0;
+  document.addEventListener("keydown", e => {
+    if (!["ArrowLeft", "ArrowRight", " ", "PageDown"].includes(e.key) || /INPUT|TEXTAREA/.test(e.target.tagName)) return;
+    e.preventDefault();
+    if (e.repeat || Date.now() - lastKey < 400) return; lastKey = Date.now();
+    const b = stage.querySelector("[data-primary]");
+    if (b && !b.disabled) b.click(); else skip();
+  });
+  document.addEventListener("click", e => { SFX.unlock(); if (e.target.closest && e.target.closest("button")) setTimeout(() => document.activeElement && document.activeElement.blur && document.activeElement.blur(), 0); });
 
   window.__host = { get S() { return S; }, room, joinUrl };
 })();
