@@ -29,10 +29,10 @@
     return dp[a.length][b.length];
   }
 
-  // شكل «متساهل» للمقارنة: نشيل الحروف المكررة (عييييش) والألف (كاوتش = كوتش)
-  function loose(n) {
-    return n.replace(/(.)\1+/g, "$1").replace(/ا/g, "");
-  }
+  // نشيل الحروف المكررة (عييييش = عيش)
+  const collapse = n => n.replace(/(.)\1+/g, "$1");
+  // ومن غير الألف (كاوتش = كوتش) بس للكلمات اللي 4 حروف أو أكتر، عشان «لبن» متبقاش «لبان»
+  const noAlif = n => collapse(n).replace(/ا/g, "");
 
   // هل الكدبة دي هي الحقيقة؟
   function isTruth(text, q) {
@@ -40,9 +40,8 @@
     if (!n) return false;
     const accepted = [q.truth].concat(q.accept || []).map(normalize);
     if (accepted.includes(n)) return true;
-    const ln = loose(n);
-    if (accepted.some(a => { const la = loose(a); return la === ln && la.length >= 3 && la.length >= a.length - 1; })) return true;
-    if (accepted.some(a => loose(a) === ln && ln.length >= 4)) return true;
+    if (accepted.some(a => collapse(a) === collapse(n))) return true;
+    if (noAlif(n).length >= 4 && accepted.some(a => noAlif(a) === noAlif(n))) return true;
     if ((q.keywords || []).map(normalize).some(k => k && n.includes(k))) return true;
     if (n.length > 4 && accepted.some(a => lev(a, n) <= 1)) return true;
     return false;
