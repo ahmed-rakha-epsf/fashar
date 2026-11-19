@@ -261,7 +261,7 @@
       $("send").className = "btn pbtn" + (sent ? " ghost" : "");
       let msg = "";
       if (sent) msg = `<div class="pmsg ok pop">اتبعت ✅ كدبتك جاهزة… استنى الباقيين</div>`;
-      else if (rej) msg = `<div class="pmsg warn shake">🙈 انت كتبت الحقيقة! برافو… بس المطلوب كدبة، اكتب حاجة تانية</div>`;
+      else if (rej) msg = `<div class="pmsg warn shake">🙈 دي الإجابة الصح! برافو عليك… بس المطلوب كدبة، اكتب واحدة غيرها</div>`;
       if ($("msg").innerHTML !== msg) $("msg").innerHTML = msg;
       if (sent) setBanner("✅ اتبعت! بص على الشاشة لحد ما الكل يخلص", "done");
       else setBanner("✍️ اكتب إجابة <u>غلط</u> تبان حقيقية", "act");
