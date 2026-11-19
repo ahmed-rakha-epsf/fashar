@@ -85,7 +85,7 @@
       if (max > 0) leaders = pids().filter(p => (scores[p] || 0) === max);
     }
     await db.remove(`r${r}`);
-    await db.set("state", { phase: "intro", round: r, qIndex: qi, usedQ: used.concat([qi]), leaders, prompt: Q[qi].prompt, mult: last ? 2 : 1, hunt: leaders.length > 0, last: !!last });
+    await db.set("state", { phase: "intro", round: r, qIndex: qi, usedQ: used.concat([qi]), leaders, prompt: Q[qi].prompt, mult: last ? 2 : 1, hunt: leaders.length > 0, last: !!last, lastTi: S.lastTi === undefined ? -1 : S.lastTi });
   }
   async function startWrite() {
     if (!S || S.phase !== "intro") return;
@@ -141,11 +141,16 @@
     }
     list.push({ t: q.truth, a: [], truth: true });
     shuffle(list);
-    const ti = list.findIndex(o => o.truth);
+    // الحقيقة مكانها عشوائي، ومتجيش في نفس الرقم بتاع السؤال اللي فات (عشان محدش يلاحظ نمط)
+    let ti = list.findIndex(o => o.truth);
+    if (list.length > 2 && ti === S.lastTi) {
+      let j; do { j = Math.floor(Math.random() * list.length); } while (j === ti);
+      [list[ti], list[j]] = [list[j], list[ti]]; ti = j;
+    }
     list.forEach((o, i) => { if (o.bot) bots.push(i); });
     localStorage.setItem(metaKey(r), JSON.stringify({ ti, bots }));
     const clean = list.map(o => ({ t: o.t, a: o.a.length ? o.a : ["-"] }));
-    await db.update({ [`r${r}/options`]: clean, "state/phase": "vote", "state/endsAt": db.now() + VOTE_SEC * 1000, "state/total": VOTE_SEC * 1000 });
+    await db.update({ [`r${r}/options`]: clean, "state/lastTi": ti, "state/phase": "vote", "state/endsAt": db.now() + VOTE_SEC * 1000, "state/total": VOTE_SEC * 1000 });
     ending = false;
   }
 

@@ -475,36 +475,72 @@ bdi.ltr { direction: ltr; unicode-bidi: isolate; display: inline-block; }
 .lobby .howbtn { margin: 10px 0 14px; font-size: 24px; }
 
 /* ---------- قسم «إزاي نلعب؟» ---------- */
-.howto-ov { position: fixed; inset: 0; z-index: 50; background: rgba(14,9,30,.97); backdrop-filter: blur(8px); display: grid; place-items: center; padding: 18px; }
+.howto-ov { position: fixed; inset: 0; z-index: 50; background: rgba(14,9,30,.97); backdrop-filter: blur(8px); display: grid; place-items: center; padding: 16px 22px; }
 .howto-ov.hidden { display: none; }
-.ho-box { width: min(1500px, 100%); height: min(860px, 100%); display: flex; flex-direction: column; gap: 14px; }
+.ho-box { width: 100%; height: 100%; display: flex; flex-direction: column; gap: 10px; }
 .ho-head { display: flex; align-items: center; gap: 18px; }
-.ho-step { font-family: var(--display); color: var(--ink); background: var(--yellow); border: 3px solid var(--ink); border-radius: 999px; padding: 4px 16px 0; font-size: 24px; direction: ltr; }
-.ho-t { flex: 1; font-family: var(--display); font-size: 46px; color: var(--yellow); text-shadow: 0 4px 0 var(--ink); line-height: 1.1; }
-.ho-body { flex: 1; min-height: 0; display: flex; gap: 28px; align-items: center; }
-.ho-text { flex: 0 0 34%; display: flex; flex-direction: column; gap: 16px; }
-.ho-d { font-size: 27px; font-weight: 800; line-height: 1.6; color: var(--text, #fff); }
-.ho-d b { color: var(--yellow); }
-.ho-d b.g, .ho-pts b.g { color: var(--green); }
-.ho-d b.y, .ho-pts b.y { color: var(--yellow); }
-.hdots { color: var(--pink); font-weight: 900; letter-spacing: .1em; }
-.ho-cap { font-size: 20px; font-weight: 800; color: var(--ink); background: var(--cream); border: 3px solid var(--ink); border-radius: 14px; padding: 8px 14px; align-self: flex-start; transform: rotate(-1deg); }
-.ho-imgs { flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; justify-content: center; gap: 22px; }
-.ho-screen { flex: 1; min-width: 0; max-height: 100%; }
-.ho-screen img { width: 100%; max-height: 66vh; object-fit: contain; display: block; border-radius: 14px; border: 5px solid var(--ink); box-shadow: 0 0 0 3px rgba(255,255,255,.18), 0 14px 0 rgba(0,0,0,.4); }
-.ho-phone { flex: 0 0 auto; height: 100%; display: flex; align-items: center; }
-.ho-phone img { height: min(66vh, 600px); display: block; border-radius: 30px; border: 9px solid #0b0716; box-shadow: 0 0 0 3px rgba(255,255,255,.22), 0 14px 0 rgba(0,0,0,.4); }
-.ho-imgs.both .ho-phone img { height: min(60vh, 540px); }
+.ho-t { flex: 1; text-align: center; font-family: var(--display); font-size: 50px; color: var(--yellow); text-shadow: 0 4px 0 var(--ink); line-height: 1.15; padding-inline-start: 140px; }
+.ho-body { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
+.ho-imgs { display: flex; align-items: center; justify-content: center; gap: 70px; height: 100%; width: 100%; padding: 30px 40px; }
+.shot { position: relative; display: inline-block; flex: 0 1 auto; }
+.shot img { display: block; }
+.shot.screen img { max-width: min(100%, 1100px); max-height: calc(100vh - 230px); border-radius: 14px; border: 5px solid var(--ink); box-shadow: 0 0 0 3px rgba(255,255,255,.18), 0 14px 0 rgba(0,0,0,.4); }
+.ho-imgs .shot.screen { min-width: 0; flex: 1 1 auto; max-width: 66%; }
+.ho-imgs .shot.screen:only-child { max-width: 100%; flex: 0 1 auto; }
+.ho-imgs .shot.screen img { width: 100%; height: auto; }
+.ho-imgs .shot.screen:only-child img { width: auto; }
+.shot.phone img { height: min(calc(100vh - 250px), 560px); width: auto; border-radius: 26px; border: 8px solid #0b0716; box-shadow: 0 0 0 3px rgba(255,255,255,.22), 0 14px 0 rgba(0,0,0,.4); }
+/* المربعات والأسهم اللي على الصور */
+.hm { position: absolute; border: 3px solid var(--yellow); border-radius: 12px; box-shadow: 0 0 0 3px rgba(29,21,51,.85), 0 0 26px rgba(255,210,63,.75); margin: -3px; padding: 2px; box-sizing: content-box; animation: hmIn .45s both; pointer-events: none; }
+@keyframes hmIn { from { opacity: 0; transform: scale(1.15); } to { opacity: 1; transform: none; } }
+.hm-lab { position: absolute; white-space: nowrap; background: var(--yellow); color: var(--ink); border: 3px solid var(--ink); border-radius: 14px; padding: 4px 16px; font-weight: 900; font-size: 24px; box-shadow: 0 5px 0 rgba(0,0,0,.45); z-index: 2; }
+.hm-lab::after { content: ""; position: absolute; width: 0; height: 0; border: 12px solid transparent; }
+.hm-lab.b { top: calc(100% + 20px); left: 50%; transform: translateX(-50%); }
+.hm-lab.b::after { bottom: 100%; left: 50%; margin-left: -12px; border-bottom-color: var(--ink); }
+.hm-lab.t { bottom: calc(100% + 20px); left: 50%; transform: translateX(-50%); }
+.hm-lab.t::after { top: 100%; left: 50%; margin-left: -12px; border-top-color: var(--ink); }
+.hm-lab.r { left: calc(100% + 22px); top: 50%; transform: translateY(-50%); }
+.hm-lab.r::after { right: 100%; top: 50%; margin-top: -12px; border-right-color: var(--ink); }
+.hm-lab.l { right: calc(100% + 22px); top: 50%; transform: translateY(-50%); }
+.hm-lab.l::after { left: 100%; top: 50%; margin-top: -12px; border-left-color: var(--ink); }
+.shot.phone .hm-lab { font-size: 21px; }
 .ho-nav { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.ho-dots { display: flex; gap: 8px; }
+.ho-dots { display: flex; gap: 10px; }
 .ho-dots i { width: 14px; height: 14px; border-radius: 50%; background: rgba(255,255,255,.22); cursor: pointer; }
 .ho-dots i.past { background: rgba(255,210,63,.5); }
 .ho-dots i.on { background: var(--yellow); transform: scale(1.35); }
-.ho-pts { display: flex; flex-direction: column; gap: 10px; }
-.ho-pts div { display: grid; grid-template-columns: 44px 1fr auto; align-items: center; gap: 10px; background: rgba(255,255,255,.07); border: 2px solid rgba(255,255,255,.15); border-radius: 14px; padding: 8px 14px; font-size: 24px; font-weight: 800; }
-.ho-pts div span:first-child { font-size: 30px; }
-.ho-pts b { font-family: var(--display); font-weight: normal; font-size: 32px; white-space: nowrap; }
-.ho-note { margin-top: 14px; font-size: 22px; font-weight: 800; color: var(--pink); }
-.ho-end { flex: 1; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 26px; }
-.ho-big { font-family: var(--display); font-size: 90px; color: var(--yellow); text-shadow: 0 6px 0 var(--ink); }
-.ho-end .ho-d { font-size: 34px; }
+.ho-ptswrap { width: min(900px, 100%); }
+.ho-pts { display: flex; flex-direction: column; gap: 16px; }
+.ho-pts div { display: grid; grid-template-columns: 70px 1fr auto; align-items: center; gap: 16px; background: var(--cream); color: var(--ink); border: 4px solid var(--ink); border-radius: 20px; padding: 12px 26px; font-size: 36px; font-weight: 900; box-shadow: 0 8px 0 rgba(0,0,0,.4); }
+.ho-pts div span:first-child { font-size: 46px; }
+.ho-pts b { font-family: var(--display); font-weight: normal; font-size: 48px; white-space: nowrap; color: var(--ink); background: var(--green); border: 3px solid var(--ink); border-radius: 14px; padding: 2px 16px 0; }
+.ho-pts b.y { background: var(--yellow); }
+.ho-end { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 30px; }
+.ho-big { font-family: var(--display); font-size: 110px; color: var(--yellow); text-shadow: 0 6px 0 var(--ink); }
+.ho-n { display: inline-grid; place-items: center; width: 62px; height: 62px; border-radius: 50%; background: var(--yellow); color: var(--ink); text-shadow: none; border: 4px solid var(--ink); font-size: 40px; vertical-align: middle; margin-inline-end: 10px; padding-top: 6px; }
+
+/* ---------- شاشات قصيرة (لابتوب 720): الكشف يصغر شوية عشان ميدخلش تحت زرار التالي ---------- */
+@media (max-height: 820px) {
+  .stage.ph-reveal { padding-top: 8px; padding-bottom: 92px; }
+  .nextbar { bottom: 12px; }
+  .qmini { font-size: 22px; line-height: 1.4; }
+  .rv-top { gap: 6px; }
+  .rcard { padding: 12px 30px 14px; }
+  .rc-label, .rc-k { font-size: 21px; }
+  .rc-answer { margin: 0 0 4px; }
+  .rc-answer .txt { font-size: 58px; }
+  .stamp-slot { top: -46px; }
+  .stamp-slot .stamp { font-size: 52px; padding: 10px 24px 2px; border-width: 5px; }
+  .rcard .chip.big { font-size: 19px; }
+  .voters { min-height: 40px; gap: 8px; }
+  .rc-who { gap: 6px; }
+  .rc-result { margin-top: 6px; min-height: 76px; }
+  .verdict { gap: 8px; }
+  .vline .vk { font-size: 24px; }
+  .points { font-size: 38px; padding: 6px 22px 0; }
+  .points small { font-size: 17px; }
+  .hunt { font-size: 22px; padding: 2px 14px; }
+  .rcard.truth .story { font-size: 18px; margin: 2px auto 8px; padding: 6px 14px; }
+  .suspense { font-size: 42px; }
+  .nextbar .btn.huge { font-size: 26px; padding: 6px 32px 2px; }
+}
