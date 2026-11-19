@@ -464,3 +464,5 @@ kbd { font-family: var(--body); background: var(--bg3); border: 2px solid rgba(2
 bdi.ltr { direction: ltr; unicode-bidi: isolate; display: inline-block; }
 
 .rcard.truth .story { font-size: 24px; font-weight: 700; color: #1d4d3c; background: rgba(46,229,157,.14); border-radius: 14px; padding: 10px 18px; margin: 4px auto 12px; max-width: 1050px; line-height: 1.6; }
+.sc-head .sc-sub { font-family: var(--body); font-size: 22px; color: var(--muted, #b3a8d6); text-shadow: none; font-weight: 700; margin-inline-start: 10px; }
+.nextbar .btn.ghost { white-space: nowrap; }

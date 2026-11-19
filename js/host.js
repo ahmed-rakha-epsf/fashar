@@ -1,6 +1,6 @@
 // شاشة المذيع (دي اللي بتتعمل شير سكرين)
 (function () {
-  const ROUNDS = 3;          // عدد الجولات الأساسية
+  const PLANNED = 5;         // عدد الأسئلة المقترح — المذيع يقدر ينهي قبلها أو يزوّد
   const WRITE_SEC = 50;      // وقت كتابة الكدبة
   const VOTE_SEC = 30;       // وقت الاختيار
   const AUTO_MS = 9000;      // الكشف التلقائي (لو المذيع شغّله): وقت كل خطوة
@@ -65,7 +65,8 @@
   const namesOf = list => UI.names(players, list);
   const pids = () => UI.order(players);
   const onlinePids = () => pids().filter(p => players[p].online !== false);
-  const mult = r => (r >= 2 ? 2 : 1);
+  const mult = () => (S && S.mult) || 1;
+  const huntOn = () => !!(S && S.hunt && (S.leaders || []).length);
   const curQ = () => Q[S.qIndex] || { prompt: S.prompt, hint: S.hint, truth: "" };
   function nextQ(used) { for (let i = 0; i < Q.length; i++) if (!used.includes(i)) return i; return Math.floor(Math.random() * Q.length); }
   function promptHTML(p, fill) {
@@ -74,16 +75,16 @@
   function metaKey(r) { return `fishar_meta_${room}_${r}`; }
 
   // ---------- الانتقالات ----------
-  async function startIntro(r) {
+  async function startIntro(r, last) {
     const used = S.usedQ || [];
     const qi = nextQ(used);
     let leaders = [];
-    if (r === 1) {
+    if (r >= 1) {
       const max = Math.max(0, ...pids().map(p => scores[p] || 0));
       if (max > 0) leaders = pids().filter(p => (scores[p] || 0) === max);
     }
     await db.remove(`r${r}`);
-    await db.set("state", { phase: "intro", round: r, qIndex: qi, usedQ: used.concat([qi]), leaders, prompt: Q[qi].prompt, hint: Q[qi].hint, mult: mult(r) });
+    await db.set("state", { phase: "intro", round: r, qIndex: qi, usedQ: used.concat([qi]), leaders, prompt: Q[qi].prompt, hint: Q[qi].hint, mult: last ? 2 : 1, hunt: leaders.length > 0, last: !!last });
   }
   async function startWrite() {
     if (!S || S.phase !== "intro") return;
@@ -171,11 +172,11 @@
 
   async function endVote() {
     if (ending || S.phase !== "vote") return; ending = true;
-    const r = S.round, m = mult(r), { ti, bots } = readMeta(r);
+    const r = S.round, m = mult(), { ti, bots } = readMeta(r);
     const gain = {}, st = JSON.parse(JSON.stringify(stats || {}));
     const add = (p, n) => { gain[p] = (gain[p] || 0) + n; };
     const bump = (p, k) => { st[p] = st[p] || { fooled: 0, found: 0, gullible: 0 }; st[p][k] = (st[p][k] || 0) + 1; };
-    const leaders = (r === 1 && S.leaders) ? S.leaders : [];
+    const leaders = S.hunt ? (S.leaders || []) : [];
     for (const v of Object.keys(votes)) {
       const c = votes[v]; const o = options[c]; if (!o) continue;
       if (c === ti) { add(v, 2 * m); bump(v, "found"); continue; }
@@ -243,7 +244,7 @@
     $("btnAuto").classList.toggle("on", autoOn);
     $("btnAuto").textContent = autoOn ? "⏯ الكشف تلقائي: شغّال" : "⏯ الكشف تلقائي: مقفول";
     const r = S.round, inGame = !["lobby", "final"].includes(ph);
-    const roundTxt = inGame ? `الجولة ${r + 1}${r < ROUNDS ? " من " + ROUNDS : " (زيادة)"}${r === 1 ? " · 👑" : r >= 2 ? " · ×2 🔥" : ""}` : "";
+    const roundTxt = inGame ? `السؤال ${r + 1}${S.last ? " · آخر سؤال ×2 🔥" : S.hunt ? " · 👑" : ""}` : "";
     const p = PHASES[ph] || ["", ""];
     const html = (roundTxt ? `<span class="pill round">${roundTxt}</span>` : "") + `<span class="pill phase">${p[0]} ${p[1]}</span>`;
     if ($("phaseInfo").innerHTML !== html) $("phaseInfo").innerHTML = html;
@@ -292,10 +293,10 @@
         </div>`;
       $("btnStart").onclick = () => { SFX.unlock(); startIntro(0); };
     } else if (ph === "intro") {
-      const ls = S.leaders || [], m = mult(r);
+      const ls = S.leaders || [], m = mult();
       let title, body;
       if (r === 0) {
-        title = "الجولة الأولى";
+        title = "أول سؤال";
         body = `<div class="rule-card">هقولكم معلومة <b>غريبة… بس حقيقية 100%</b> وفيها كلمة ناقصة</div>
           <div class="steps3">
             <div class="s3"><span class="e">✍️</span><b>اكتب كدبة</b><small>إجابة غلط تبان حقيقية</small></div>
@@ -305,7 +306,7 @@
             <div class="s3"><span class="e">🏆</span><b>اجمع نقط</b><small>من الحقيقة ومن اللي صدّقوك</small></div>
           </div>
           <div class="ptsline">${ptsLine(m)}</div>`;
-      } else if (r === 1) {
+      } else if (!S.last) {
         title = "👑 اصطاد المتصدر";
         body = ls.length
           ? `<div class="rule-card">المتصدر دلوقتي:</div><div class="leaders">${ls.map(p => chip(p, "big crown")).join("")}</div>
@@ -313,11 +314,11 @@
           : `<div class="rule-card">لسه مفيش متصدر… العبوا عادي 😄</div>`;
         body += `<div class="ptsline">${ptsLine(m)}</div>`;
       } else {
-        title = r === 2 ? "الجولة الأخيرة" : "جولة زيادة";
+        title = "آخر سؤال 🔥";
         body = `<div class="x2 sticker tilt-l">النقط ×2 🔥</div><div class="rule-card">أي حد لسه يقدر يكسب… ركّزوا!</div><div class="ptsline">${ptsLine(m)}</div>`;
       }
       stage.innerHTML = `<div class="intro">
-          <div class="round-num pop">الجولة ${r + 1}${r < ROUNDS ? " من " + ROUNDS : ""}</div>
+          <div class="round-num pop">السؤال ${r + 1}</div>
           <div class="big pop d1">${title}</div>
           <div class="pop d2">${body}</div>
         </div>
@@ -329,11 +330,11 @@
       stage.innerHTML = `
         <div class="qcard sticker pop"><div class="q">${promptHTML(S.prompt)}</div><div class="qhint">${esc(S.hint)}</div></div>
         <div class="instr drop"><span class="big-e">📱</span><span>اكتبوا على موبايلاتكم إجابة <u>غلط</u>… بس تبان حقيقية، عشان تضحكوا بيها على الباقيين</span></div>
-        ${r === 1 && ls.length ? `<div class="instr hot drop">🎯 اللي يضحك على ${namesOf(ls)} ياخد ${plus(3)}</div>` : ""}
+        ${huntOn() ? `<div class="instr hot drop">🎯 اللي يضحك على ${namesOf(ls)} ياخد ${plus(3)}</div>` : ""}
         <div class="botrow">${timerHTML()}<div class="statusbox"><div class="stc" id="stc"></div><div class="statusrow" id="status"></div></div></div>`;
       SFX.whoosh();
     } else if (ph === "vote") {
-      const opts = options || [], m = mult(r);
+      const opts = options || [], m = mult();
       stage.innerHTML = `
         <div class="qcard sticker small"><div class="q">${promptHTML(S.prompt)}</div></div>
         <div class="instr drop"><span class="big-e">📱</span><span>فيهم إجابة <b>واحدة بس صح</b>… اختاروها من موبايلاتكم <span class="muted">(لقيتها = ${plus(2 * m)})</span></span></div>
@@ -388,7 +389,7 @@
   let revealShell = null, autoTimer = null;
   function lieMeta(i) {
     const o = (options || [])[i] || { t: "", a: [] };
-    const r = S.round, m = mult(r), leaders = r === 1 ? (S.leaders || []) : [];
+    const r = S.round, m = mult(), leaders = S.hunt ? (S.leaders || []) : [];
     const a = authorsOf(o), v = votersOf(i), hunters = v.filter(x => leaders.includes(x));
     return { t: o.t, a, v, hunters, pts: v.length * m + hunters.length * 3 };
   }
@@ -422,13 +423,13 @@
       const nx = script[stp + 1];
       $("btnStep").textContent = it.k === "lie" && it.s === 0 ? "اكشفها! 🔍" : nx && nx.k === "drum" ? "يلا نشوف الحقيقة 🥁" : it.k === "drum" ? "اكشف الحقيقة ✅" : "التالي ⏭";
     }
-    const rvb = $("rvb"), m = mult(r);
+    const rvb = $("rvb"), m = mult();
     if (it.k !== "truth") { const qm = promptHTML(S.prompt); const el = stage.querySelector(".qmini"); if (el.innerHTML !== qm) el.innerHTML = qm; }
     if (it.k === "intro") {
       rvb.innerHTML = `<div class="rv-intro">
         <div class="big pop">يلا نشوف مين ضحك على مين 👀</div>
         <div class="sub pop d1">هنعرض كل إجابة الناس اختاروها… ونكشف: <b class="pink">كدبة</b> ولا <b class="green">حقيقة</b>؟</div>
-        <div class="ptsline pop d2">${ptsLine(m)}${r === 1 && (S.leaders || []).length ? `<span class="pt"><i>🎯</i> المتصدر صدّقك = <b>${plus(3)}</b></span>` : ""}</div></div>`;
+        <div class="ptsline pop d2">${ptsLine(m)}${huntOn() ? `<span class="pt"><i>🎯</i> المتصدر صدّقك = <b>${plus(3)}</b></span>` : ""}</div></div>`;
       SFX.whoosh();
     } else if (it.k === "lie") {
       const L = lieMeta(it.o);
@@ -521,10 +522,15 @@
       const oldR = rankMap(oldO, before), newR = rankMap(newO, now);
       const moved = new Set(ps.map(before)).size > 1; // أول جولة الكل كان صفر: مفيش «طلع/نزل»
       const top = now(newO[0]);
-      const lastMain = r >= ROUNDS - 1;
+      const left = Q.length - (S.usedQ || []).length, asked = r + 1;
       const n = ps.length, rowH = n > 8 ? 56 : n > 6 ? 66 : 76;
-      const nextLabel = r + 1 === 1 ? "الجولة الجاية: 👑 اصطاد المتصدر ⏭" : r + 1 === 2 ? "الجولة الأخيرة (النقط ×2) ⏭" : "الجولة الجاية ⏭";
-      stage.innerHTML = `<div class="sc-head pop">الترتيب بعد الجولة ${r + 1}</div>
+      const endBtn = (primary) => `<button class="btn ${primary ? "huge" : "ghost"}" id="btnFinal"${primary ? " data-primary" : ""}>${primary ? "النتيجة النهائية والجوايز 🏆" : "ننهي هنا ونعلن النتيجة 🏁"}</button>`;
+      let bar;
+      if (S.last || left <= 0) bar = (left > 0 ? `<button class="btn ghost" id="btnMore">سؤال زيادة 🔁</button>` : "") + endBtn(true);
+      else if (asked >= PLANNED - 1 || left === 1) bar = endBtn(false) + `<button class="btn huge" id="btnLast" data-primary>آخر سؤال (النقط ×2) 🔥</button>`;
+      else bar = endBtn(false) + `<button class="btn ghost" id="btnLast">آخر سؤال (×2) 🔥</button><button class="btn huge" id="btnNext" data-primary>السؤال الجاي ⏭</button>`;
+      bar += keyHint;
+      stage.innerHTML = `<div class="sc-head pop">الترتيب بعد السؤال ${r + 1} <small class="sc-sub">(${left > 0 ? `فاضل ${left} أسئلة في البنك` : "خلصت الأسئلة"})</small></div>
         <div class="board" style="height:${n * rowH}px;--rh:${rowH}px">${oldO.map((p, i) => {
           const a = UI.avatar(players, p), d = moved ? (oldR[p] || 0) - (newR[p] || 0) : 0;
           return `<div class="brow" data-p="${p}" style="top:${i * rowH}px;--c:${a.c}">
@@ -533,10 +539,10 @@
             <div class="gain ${gain[p] ? "" : "zero"}">${plus(gain[p] || 0)}</div>
             <div class="pts">${before(p)}</div></div>`;
         }).join("")}</div>
-        ${nextBar(lastMain ? `<button class="btn ghost" id="btnExtra">جولة زيادة 🔁</button><button class="btn huge" id="btnFinal" data-primary>الجوايز والنتيجة النهائية 🏆</button>${keyHint}`
-                           : `<button class="btn huge" id="btnNext" data-primary>${nextLabel}</button>${keyHint}`)}`;
+        ${nextBar(bar)}`;
       if ($("btnNext")) $("btnNext").onclick = () => startIntro(r + 1);
-      if ($("btnExtra")) $("btnExtra").onclick = () => startIntro(r + 1);
+      if ($("btnLast")) $("btnLast").onclick = () => startIntro(r + 1, true);
+      if ($("btnMore")) $("btnMore").onclick = () => startIntro(r + 1, true);
       if ($("btnFinal")) $("btnFinal").onclick = toFinal;
       SFX.whoosh();
       // 1) النقط الجديدة تطلع  2) العدّ يطلع  3) الصفوف تتحرك لمكانها الجديد

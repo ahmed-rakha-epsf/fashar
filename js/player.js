@@ -116,7 +116,7 @@
 
   function promptHTML(p, fill) { return esc(p || "").replace("____", fill != null ? `<span class="blank filled">${esc(fill)}</span>` : '<span class="blank">؟؟</span>'); }
   function rankOf(p, sc) { const arr = Object.keys(players).map(x => sc[x] || 0).sort((a, b) => b - a); return arr.indexOf(sc[p] || 0) + 1; }
-  const m = () => (S.round >= 2 ? 2 : 1);
+  const m = () => (S && S.mult) || 1;
   const mine = o => ((o && o.a) || []).includes(pid);
   const hasVote = () => myVote !== null && myVote !== undefined;
 
@@ -138,16 +138,16 @@
       setBanner("👀 بص على الشاشة… هنبدأ دلوقتي", "look");
       let rule = "", extra = "";
       if (r === 0) rule = "هتظهر معلومة حقيقية فيها كلمة ناقصة… اكتب مكانها كدبة تقنع زمايلك";
-      else if (r === 1) {
+      else if (!S.last) {
         rule = "👑 اصطاد المتصدر";
         if (leaders.length) extra = leaders.includes(pid)
-          ? `<div class="pmsg gold">👑 انت المتصدر! كل الناس هتحاول تضحك عليك الجولة دي… خلي بالك</div>`
+          ? `<div class="pmsg gold">👑 انت المتصدر! كل الناس هتحاول تضحك عليك السؤال ده… خلي بالك</div>`
           : `<div class="pmsg gold">🎯 لو ${leaders.map(p => esc(nameOf(p))).join(" أو ")} صدّق كدبتك تاخد ${plus(3)} بونص</div>`;
-      } else rule = "🔥 النقط ×2 في الجولة دي";
-      view.innerHTML = `<div class="pround pop">الجولة ${r + 1}${r < 3 ? " من 3" : ""}</div><div class="pmid pop d1">${rule}</div>${extra}
+      } else rule = "🔥 آخر سؤال… النقط ×2";
+      view.innerHTML = `<div class="pround pop">السؤال ${r + 1}</div><div class="pmid pop d1">${rule}</div>${extra}
         <div class="ppts pop d2"><span>✅ لقيت الحقيقة <b>${plus(2 * m())}</b></span><span>😈 كل واحد صدّقك <b>${plus(m())}</b></span></div>`;
     } else if (ph === "write") {
-      const hunt = r === 1 && leaders.length
+      const hunt = S.hunt && leaders.length
         ? (leaders.includes(pid) ? `<div class="pmsg gold" style="margin:0 0 12px">👑 كل الناس بتحاول تضحك عليك!</div>` : `<div class="pmsg gold" style="margin:0 0 12px">🎯 اضحك على ${leaders.map(p => esc(nameOf(p))).join(" أو ")} وخد ${plus(3)}</div>`)
         : "";
       view.innerHTML = `<div class="pcard">
@@ -194,7 +194,7 @@
       setBanner("🏆 الترتيب على الشاشة", "look");
       const g = gain || 0;
       const nowR = rankOf(pid, scores), oldR = rankOf(pid, prev), d = new Set(Object.keys(players).map(x => prev[x] || 0)).size > 1 ? oldR - nowR : 0;
-      view.innerHTML = `<div class="pmuted">الجولة دي جبت</div><div class="gainbig pop ${g ? "" : "zero"}">${plus(g)}</div>
+      view.innerHTML = `<div class="pmuted">السؤال ده جبت</div><div class="gainbig pop ${g ? "" : "zero"}">${plus(g)}</div>
         <div class="pstats pop d1"><div><b>${scores[pid] || 0}</b><small>مجموعك</small></div><div><b>#${nowR}</b><small>ترتيبك</small></div></div>
         ${d > 0 ? `<div class="pmsg ok pop d2">▲ طلعت ${d} ${d === 1 ? "مركز" : "مراكز"} 🚀</div>` : d < 0 ? `<div class="pmsg warn pop d2">▼ نزلت ${-d} ${-d === 1 ? "مركز" : "مراكز"}… لسه فيه وقت!</div>` : ""}
         ${nowR === 1 && (scores[pid] || 0) > 0 ? `<div class="pmsg gold pop d2">👑 انت في المركز الأول!</div>` : ""}`;
@@ -229,7 +229,7 @@
       if (it.s === 0) html += isMine ? `<div class="pmsg gold pop d1">😏 دي كدبتك! ${v.length} صدّقوها… اسكت متفضحش نفسك</div>`
         : iPicked ? `<div class="pmsg pop d1">🤞 انت اخترت دي… ياترى صح؟</div>` : `<div class="pmid pop d1">حقيقة ولا كدبة؟ 🤔</div>`;
       else {
-        const pts = v.length * m() + v.filter(x => S.round === 1 && (S.leaders || []).includes(x)).length * 3;
+        const pts = v.length * m() + v.filter(x => S.hunt && (S.leaders || []).includes(x)).length * 3;
         html += isMine ? `<div class="pmsg ok pop d1">😈 كدبتك ضحكت على ${v.length}! <b>${plus(pts)}</b></div>`
           : iPicked ? `<div class="pmsg warn pop d1">😅 اتضحك عليك! ${it.bot || !(o.a || []).filter(x => x !== "-").length ? "دي كدبة من عند اللعبة 🤖" : "دي كدبة " + esc(namesOf((o.a || []).filter(x => x !== "-")))}</div>`
           : `<div class="pmid pop d1">❌ طلعت كدبة</div>`;
@@ -237,7 +237,7 @@
       }
     } else if (it.k === "nobody") {
       const mineNobody = myOpt >= 0 && myOpt !== ti && !fooled.length;
-      html = mineNobody ? `<div class="pbig">😅</div><div class="pmsg pop">كدبتك محدش صدّقها المرة دي… الجولة الجاية!</div>` : `<div class="pbig">👀</div><div class="pmid">كدبات محدش صدّقها</div>`;
+      html = mineNobody ? `<div class="pbig">😅</div><div class="pmsg pop">كدبتك محدش صدّقها المرة دي… السؤال الجاي!</div>` : `<div class="pbig">👀</div><div class="pmid">كدبات محدش صدّقها</div>`;
     } else if (it.k === "drum") {
       html = `<div class="pbig drumb">🥁</div><div class="pmid">والحقيقة هي…</div>${picked}`;
     } else if (it.k === "truth") {
