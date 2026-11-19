@@ -114,7 +114,7 @@
     updateDynamic();
   }
 
-  function promptHTML(p, fill) { return esc(p || "").replace("____", fill != null ? `<span class="blank filled">${esc(fill)}</span>` : '<span class="blank">؟؟</span>'); }
+  function promptHTML(p, fill) { return esc(p || "").replace("____", fill != null ? `<span class="blank filled">${esc(fill)}</span>` : '<span class="blank dots">……</span>'); }
   function rankOf(p, sc) { const arr = Object.keys(players).map(x => sc[x] || 0).sort((a, b) => b - a); return arr.indexOf(sc[p] || 0) + 1; }
   const m = () => (S && S.mult) || 1;
   const mine = o => ((o && o.a) || []).includes(pid);
@@ -131,7 +131,7 @@
         <div class="pcard howto-p">
           <div><span>✍️</span> هتكتب كدبة تبان حقيقية</div>
           <div><span>🕵️</span> وتدوّر على الحقيقة وسط كدب زمايلك</div>
-          <div><span>😈</span> كل واحد يصدّق كدبتك = نقطة ليك</div>
+          <div><span>😈</span> كل واحد يصدّق كدبتك = 2 نقطة ليك</div>
         </div>
         <div class="pmuted" id="cnt"></div>`;
     } else if (ph === "intro") {
@@ -145,15 +145,14 @@
           : `<div class="pmsg gold">🎯 لو ${leaders.map(p => esc(nameOf(p))).join(" أو ")} صدّق كدبتك تاخد ${plus(3)} بونص</div>`;
       } else rule = "🔥 آخر سؤال… النقط ×2";
       view.innerHTML = `<div class="pround pop">السؤال ${r + 1}</div><div class="pmid pop d1">${rule}</div>${extra}
-        <div class="ppts pop d2"><span>✅ لقيت الحقيقة <b>${plus(2 * m())}</b></span><span>😈 كل واحد صدّقك <b>${plus(m())}</b></span></div>`;
+        <div class="ppts pop d2"><span>😈 كل واحد صدّقك <b>${plus(2 * m())}</b></span><span>✅ لقيت الحقيقة <b>${plus(m())}</b></span></div>`;
     } else if (ph === "write") {
       const hunt = S.hunt && leaders.length
-        ? (leaders.includes(pid) ? `<div class="pmsg gold" style="margin:0 0 12px">👑 كل الناس بتحاول تضحك عليك!</div>` : `<div class="pmsg gold" style="margin:0 0 12px">🎯 اضحك على ${leaders.map(p => esc(nameOf(p))).join(" أو ")} وخد ${plus(3)}</div>`)
+        ? (leaders.includes(pid) ? `<div class="pmsg gold" style="margin:0 0 12px">👑 كل الناس بتحاول تضحك عليك!</div>` : `<div class="pmsg gold" style="margin:0 0 12px">🎯 اضحك على ${leaders.map(p => esc(nameOf(p))).join(" أو ")} وخد ${plus(3)} بونص</div>`)
         : "";
       view.innerHTML = `<div class="pcard">
         ${hunt}
         <div class="pprompt">${promptHTML(S.prompt)}</div>
-        <div class="phint">${esc(S.hint)}</div>
         <div class="ptimer-row"><div class="timerbar" id="tbar"><i></i></div><span class="tsec" id="tsec"></span></div>
         <input class="pinput" id="lie" maxlength="25" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="اكتب كدبتك هنا…">
         <div class="pcount" id="cc">0/25</div>
@@ -229,7 +228,7 @@
       if (it.s === 0) html += isMine ? `<div class="pmsg gold pop d1">😏 دي كدبتك! ${v.length} صدّقوها… اسكت متفضحش نفسك</div>`
         : iPicked ? `<div class="pmsg pop d1">🤞 انت اخترت دي… ياترى صح؟</div>` : `<div class="pmid pop d1">حقيقة ولا كدبة؟ 🤔</div>`;
       else {
-        const pts = v.length * m() + v.filter(x => S.hunt && (S.leaders || []).includes(x)).length * 3;
+        const pts = v.length * 2 * m() + v.filter(x => S.hunt && (S.leaders || []).includes(x)).length * 3;
         html += isMine ? `<div class="pmsg ok pop d1">😈 كدبتك ضحكت على ${v.length}! <b>${plus(pts)}</b></div>`
           : iPicked ? `<div class="pmsg warn pop d1">😅 اتضحك عليك! ${it.bot || !(o.a || []).filter(x => x !== "-").length ? "دي كدبة من عند اللعبة 🤖" : "دي كدبة " + esc(namesOf((o.a || []).filter(x => x !== "-")))}</div>`
           : `<div class="pmid pop d1">❌ طلعت كدبة</div>`;
@@ -243,7 +242,7 @@
     } else if (it.k === "truth") {
       const o = opts[it.o] || { t: "" };
       html = `<div class="pmuted">✅ الحقيقة:</div><div class="pans truth pop">«${esc(o.t)}»</div>`;
-      if (myVote === it.o) { html += `<div class="pmsg ok pop d1">🎉 عرفتها! <b>${plus(2 * m())}</b></div>`; UI.confetti(120); vib([40, 40, 120]); }
+      if (myVote === it.o) { html += `<div class="pmsg ok pop d1">🎉 عرفتها! <b>${plus(m())}</b></div>`; UI.confetti(120); vib([40, 40, 120]); }
       else if (!hasVote()) html += `<div class="pmsg pop d1">⏰ مالحقتش تختار المرة دي</div>`;
       else html += `<div class="pmsg warn pop d1">😬 مالقيتهاش المرة دي</div>`;
       if (fooled.length) html += `<div class="pmsg gold pop d2">😈 وكدبتك ضحكت على ${fooled.length}</div>`;
@@ -261,7 +260,7 @@
       $("send").className = "btn pbtn" + (sent ? " ghost" : "");
       let msg = "";
       if (sent) msg = `<div class="pmsg ok pop">اتبعت ✅ كدبتك جاهزة… استنى الباقيين</div>`;
-      else if (rej) msg = `<div class="pmsg warn shake">🙈 دي الإجابة الصح! برافو عليك… بس المطلوب كدبة، اكتب واحدة غيرها</div>`;
+      else if (rej) msg = `<div class="pmsg warn shake">🙈 دي الإجابة الصح! احفظها واختارها بعدين 😉<br>دلوقتي المطلوب <b>كدبة</b> تجمّعلك نقط… اكتب واحدة غيرها</div>`;
       if ($("msg").innerHTML !== msg) $("msg").innerHTML = msg;
       if (sent) setBanner("✅ اتبعت! بص على الشاشة لحد ما الكل يخلص", "done");
       else setBanner("✍️ اكتب إجابة <u>غلط</u> تبان حقيقية", "act");
