@@ -1,6 +1,5 @@
 // شاشة المذيع (دي اللي بتتعمل شير سكرين)
 (function () {
-  const PLANNED = 5;         // عدد الأسئلة المقترح — المذيع يقدر ينهي قبلها أو يزوّد
   const WRITE_SEC = 50;      // وقت كتابة الكدبة
   const VOTE_SEC = 30;       // وقت الاختيار
   const PTS_TRUTH = 1;       // لقيت الحقيقة
@@ -69,7 +68,10 @@
   const mult = () => (S && S.mult) || 1;
   const huntOn = () => !!(S && S.hunt && (S.leaders || []).length);
   const curQ = () => Q[S.qIndex] || { prompt: S.prompt, truth: "" };
-  function nextQ(used) { for (let i = 0; i < Q.length; i++) if (!used.includes(i)) return i; return Math.floor(Math.random() * Q.length); }
+  // اختيار الأسئلة وترتيبها من نافذة «⚙️ الأسئلة» (js/qsettings.js)
+  QSET.init(() => (S && S.usedQ) || []);
+  QSET.onClose = () => { if (S && S.phase === "lobby") renderPhase(); };
+  const nextQ = used => QSET.nextQ(used);
   function promptHTML(p, fill) {
     return esc(p).replace("____", fill != null ? `<span class="blank filled">${esc(fill)}</span>` : '<span class="blank dots">……</span>');
   }
@@ -282,7 +284,7 @@
           </div>
           <div class="lobby-main">
             <h1 class="title">الفشّار <span class="wob">🤥</span></h1>
-            <button class="btn ghost howbtn" id="btnHow">📖 إزاي نلعب؟</button>
+            <div class="lobbybtns"><button class="btn ghost howbtn" id="btnHow">📖 إزاي نلعب؟</button><button class="btn ghost howbtn" id="btnQs2">⚙️ الأسئلة (${QSET.plan().length})</button></div>
             ${db.mode === "local" ? `<div class="localnote">⚠️ اللعبة شغالة في <b>وضع التجربة</b>: اللاعبين لازم يفتحوا اللينك في تابات تانية <b>في نفس المتصفح ده</b>. الموبايلات مش هتظهر هنا غير بعد ما تحط إعدادات Firebase في js/config.js وترفع على GitHub.</div>` : ""}
             <div class="lp-head">اللي دخلوا: <b id="pcount">0</b></div>
             <div class="names" id="names"></div>
@@ -291,6 +293,7 @@
         </div>`;
       $("btnStart").onclick = () => { SFX.unlock(); startIntro(0); };
       $("btnHow").onclick = () => HOWTO.open();
+      $("btnQs2").onclick = () => QSET.open();
     } else if (ph === "intro") {
       const ls = S.leaders || [], m = mult();
       let title, body;
@@ -514,12 +517,12 @@
       const oldR = rankMap(oldO, before), newR = rankMap(newO, now);
       const moved = new Set(ps.map(before)).size > 1; // أول جولة الكل كان صفر: مفيش «طلع/نزل»
       const top = now(newO[0]);
-      const left = Q.length - (S.usedQ || []).length, asked = r + 1;
+      const left = Q.length - (S.usedQ || []).length, planLeft = QSET.plannedLeft(S.usedQ || []);
       const n = ps.length, rowH = n > 8 ? 56 : n > 6 ? 66 : 76;
       const endBtn = (primary) => `<button class="btn ${primary ? "huge" : "ghost"}" id="btnFinal"${primary ? " data-primary" : ""}>${primary ? "النتيجة النهائية والجوايز 🏆" : "ننهي هنا ونعلن النتيجة 🏁"}</button>`;
       let bar;
       if (S.last || left <= 0) bar = (left > 0 ? `<button class="btn ghost" id="btnMore">سؤال زيادة 🔁</button>` : "") + endBtn(true);
-      else if (asked >= PLANNED - 1 || left === 1) bar = endBtn(false) + `<button class="btn huge" id="btnLast" data-primary>آخر سؤال (النقط ×2) 🔥</button>`;
+      else if (planLeft <= 1 || left === 1) bar = endBtn(false) + `<button class="btn huge" id="btnLast" data-primary>آخر سؤال (النقط ×2) 🔥</button>`;
       else bar = endBtn(false) + `<button class="btn ghost" id="btnLast">آخر سؤال (×2) 🔥</button><button class="btn huge" id="btnNext" data-primary>السؤال الجاي ⏭</button>`;
       bar += keyHint;
       stage.innerHTML = `<div class="sc-head pop">الترتيب بعد السؤال ${r + 1}</div>
@@ -610,6 +613,7 @@
   $("btnPlus").onclick = () => { if (S && S.endsAt) { const ends = Math.max(S.endsAt, db.now()) + 15000; db.update({ "state/endsAt": ends, "state/total": Math.max(S.total || 0, ends - db.now()) }); } };
   $("btnEnd").onclick = () => { if (!S) return; if (S.phase === "write") endWrite(); else if (S.phase === "vote") endVote(); };
   $("btnSwap").onclick = swapQuestion;
+  $("btnQs").onclick = () => QSET.open();
   $("btnMute").onclick = () => { SFX.setMuted(!SFX.isMuted()); $("btnMute").textContent = SFX.isMuted() ? "🔇" : "🔊"; };
   let newArmed = null;
   $("btnNew").onclick = () => {
@@ -621,7 +625,7 @@
   let lastKey = 0;
   document.addEventListener("keydown", e => {
     if (!["ArrowLeft", "ArrowRight", " ", "PageDown"].includes(e.key) || /INPUT|TEXTAREA/.test(e.target.tagName)) return;
-    if (window.HOWTO && HOWTO.isOpen()) return;
+    if ((window.HOWTO && HOWTO.isOpen()) || (window.QSET && QSET.isOpen())) return;
     e.preventDefault();
     if (e.repeat || Date.now() - lastKey < 400) return; lastKey = Date.now();
     const b = stage.querySelector("[data-primary]");

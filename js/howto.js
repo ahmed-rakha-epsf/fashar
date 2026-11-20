@@ -1,7 +1,7 @@
 // قسم «إزاي نلعب؟»: صور حقيقية من اللعبة (مثال الكاتشب) وعليها أسهم وكلمات قصيرة
 // الصور في img/howto، وأماكن الأسهم في js/howto_marks.js (الاتنين بيتعملوا من سكريبت التصوير)
 (function () {
-  const IMG = "img/howto/", VER = "?v=11191443";
+  const IMG = "img/howto/", VER = "?v=11201508";
   const SLIDES = [
     { t: "<span class=ho-n>1</span> اكتب كدبة ✍️", shots: ["h_write", "p_write"] },
     { t: "<span class=ho-n>2</span> دوّر على الحقيقة 🕵️", shots: ["h_vote", "p_vote"] },
